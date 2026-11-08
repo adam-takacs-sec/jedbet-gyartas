@@ -419,8 +419,10 @@ async function loadStatus() {
     if (!device) { pi.textContent = 'Pi: még nem jelentkezett'; pi.className = 'pill bad'; }
     else {
       const min = (Date.now() - Date.parse(device.at)) / 60000;
-      pi.textContent = `Pi: ${min < 12 ? 'online' : 'offline'} (${ago(device.at)})`;
-      pi.className = 'pill ' + (min < 12 ? 'ok' : 'bad');
+      const bus = device.status?.sensors_on_bus;
+      const noSensors = min < 12 && bus === 0;
+      pi.textContent = noSensors ? 'Pi: online, de nem lát szenzort!' : `Pi: ${min < 12 ? 'online' : 'offline'} (${ago(device.at)})`;
+      pi.className = 'pill ' + (noSensors ? 'warn' : min < 12 ? 'ok' : 'bad');
     }
     const pending = jobs.filter((j) => j.status === 'pending' || j.status === 'printing').length;
     const failed = jobs.filter((j) => j.status === 'error').slice(0, 1)[0];

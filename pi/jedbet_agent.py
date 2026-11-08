@@ -105,7 +105,7 @@ def buffer_conn():
 
 
 def system_status():
-    st = {}
+    st = {"sensors_on_bus": len(glob.glob(W1_GLOB))}
     try:
         with open("/sys/class/thermal/thermal_zone0/temp") as f:
             st["cpu_c"] = round(int(f.read()) / 1000, 1)
@@ -122,7 +122,10 @@ def sensor_loop():
         started = time.time()
         ts = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         rows = []
-        for path in sorted(glob.glob(W1_GLOB)):
+        paths = sorted(glob.glob(W1_GLOB))
+        if not paths:
+            log("NINCS szenzor az 1-Wire buszon (kábel / felhúzó ellenállás / GND?)")
+        for path in paths:
             t = read_sensor(path)
             sid = os.path.basename(path)
             if t is None:

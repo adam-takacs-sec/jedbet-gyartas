@@ -45,16 +45,53 @@ const STATION_SENSOR = 'nubila-allomas';
 // A saját állomás legfrissebb mérése az eszköz sorozatszáma alapján:
 //   GET https://api.nubila.ai/api/v1/weather/device/{SN}?limit=1   (Authorization: Bearer <token>)
 // A token a Nubila-fiók bejelentkezési tokenje (JWT, kb. 90 napig él), ezért a lejáratát is visszaadjuk.
+// Token: ha NUBILA_EMAIL + NUBILA_PASSWORD titok van, a Worker maga jelentkezik be
+// (POST /api/v1/login), és a tokent a D1 meta táblában tartja, amíg le nem jár.
+// Ha csak NUBILA_TOKEN van, azt használja (ilyenkor kb. 90 naponta cserélni kell).
+async function nubilaToken(env, { force = false } = {}) {
+  const valid = (t) => t && (!jwtExp(t) || Date.parse(jwtExp(t)) > Date.now() + 3600_000);
+  const canLogin = env.NUBILA_EMAIL && env.NUBILA_PASSWORD;
+  if (!force) {
+    const row = await env.DB.prepare(`SELECT value FROM meta WHERE key = 'nubila_token'`).first().catch(() => null);
+    if (row && valid(row.value)) return row.value;
+    if (!canLogin && valid((env.NUBILA_TOKEN || '').trim())) return env.NUBILA_TOKEN.trim();
+  }
+  if (!canLogin) return (env.NUBILA_TOKEN || '').trim() || null;
+  const res = await fetch('https://api.nubila.ai/api/v1/login', {
+    method: 'POST', headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ email: env.NUBILA_EMAIL, password: env.NUBILA_PASSWORD }),
+  }).catch(() => null);
+  if (!res || !res.ok) { console.warn('Nubila login sikertelen', res && res.status); return null; }
+  const token = findJwt(await res.json().catch(() => null));
+  if (!token) { console.warn('Nubila login: nincs token a válaszban'); return null; }
+  await env.DB.prepare(`INSERT INTO meta (key, value) VALUES ('nubila_token', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(token).run();
+  return token;
+}
+
+function findJwt(v) {
+  if (typeof v === 'string') return /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(v) ? v : null;
+  if (v && typeof v === 'object') for (const x of Object.values(v)) { const t = findJwt(x); if (t) return t; }
+  return null;
+}
+
 async function fetchNubila(env) {
-  const token = (env.NUBILA_TOKEN || '').trim();
   const sn = (env.NUBILA_DEVICE_SN || '').trim();
-  if (!token || !sn) return { error: 'Nincs beállítva a NUBILA_TOKEN vagy a NUBILA_DEVICE_SN' };
-  const token_expires = jwtExp(token);
-  if (token_expires && Date.parse(token_expires) < Date.now()) return { error: 'Lejárt a Nubila-token', token_expires };
-  const res = await fetch(`https://api.nubila.ai/api/v1/weather/device/${encodeURIComponent(sn)}?limit=1`,
-    { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+  if (!sn) return { error: 'Nincs beállítva a NUBILA_DEVICE_SN' };
+  let token = await nubilaToken(env);
+  if (!token) return { error: 'Nincs Nubila-belépés (NUBILA_EMAIL + NUBILA_PASSWORD) vagy -token' };
+  const url = `https://api.nubila.ai/api/v1/weather/device/${encodeURIComponent(sn)}?limit=1`;
+  let res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+  if (res && res.status === 401) {
+    const fresh = await nubilaToken(env, { force: true });
+    if (fresh && fresh !== token) {
+      token = fresh;
+      res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+    }
+  }
+  const token_expires = env.NUBILA_EMAIL && env.NUBILA_PASSWORD ? null : jwtExp(token);
   if (!res || !res.ok) {
-    return { error: res ? (res.status === 401 ? 'A Nubila elutasította a tokent' : `Nubila hiba (${res.status})`) : 'Nubila nem elérhető', token_expires };
+    return { error: res ? (res.status === 401 ? 'A Nubila elutasította a belépést' : `Nubila hiba (${res.status})`) : 'Nubila nem elérhető', token_expires };
   }
   const body = await res.json().catch(() => null);
   const d = Array.isArray(body?.data) ? body.data[0] : Array.isArray(body) ? body[0] : body?.data;

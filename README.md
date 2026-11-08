@@ -34,10 +34,11 @@ Worker → Settings → Variables and Secrets:
 - `ACCESS_TEAM_DOMAIN` (szöveg): pl. `jedbet.cloudflareaccess.com`
 - `ACCESS_AUD` (szöveg): az Access-alkalmazás „Application Audience (AUD) Tag”-je
 - `DEVICE_TOKEN` (titok): amit a `pi/install.sh` kiír
-- `NUBILA_TOKEN` (titok): a Nubila-fiók bejelentkezési tokenje (JWT, kb. 90 napig él; a fejléc 10 nappal a lejárat előtt szól)
+- `NUBILA_EMAIL`, `NUBILA_PASSWORD` (titok): a Nubila-fiók belépési adatai. A Worker ezzel kér tokent (`POST /api/v1/login`), a D1 `meta` táblában tartja, és lejáratkor magától újra belép.
+- `NUBILA_TOKEN` (titok, opcionális): kézzel szerzett token, ha nincs belépési adat megadva (kb. 90 napig él; a fejléc 10 nappal előtte szól)
 - `NUBILA_DEVICE_SN`: az állomás sorozatszáma (a `wrangler.jsonc`-ben)
 
-A Nubila-állomást a nem dokumentált `GET https://api.nubila.ai/api/v1/weather/device/{SN}?limit=1` végpontról olvassuk (Bearer token), 10 percenként cronnal mentve „Nubila állomás” levegő-szenzorként.
+A Nubila-állomást (a Nubila „Hyperlocal Weather API for Prediction Market” leírása szerint) a `GET https://api.nubila.ai/api/v1/weather/device/{SN}?limit=1` végpontról olvassuk (Bearer token), 10 percenként cronnal mentve „Nubila állomás” levegő-szenzorként.
 
 Cloudflare Access: egy self-hosted alkalmazás a `jedbet.xyz`-re (engedélyezett e-mail-címekkel),
 és egy második a `jedbet.xyz/device/*` útvonalra **Bypass** szabállyal, hogy a Pi elérje.

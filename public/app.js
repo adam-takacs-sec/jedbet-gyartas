@@ -317,8 +317,9 @@ function curingChartSimple(canvas, r) {
     label: 'Kötés %', data: series, borderColor: '#d62828', backgroundColor: 'rgba(214,40,40,.12)',
     fill: 'origin', pointRadius: 0, borderWidth: 3, tension: .2,
   }];
-  const rawMax = (last ? last.x : 0) * 1.05 || 6;
-  const maxX = Math.ceil(rawMax / 6) * 6; // kerek tengelyvég (6 órás lépés)
+  // A grafikon vége mindig a mostani idő (lezárt kötésnél / raklapnál a vége), így az egész eddigi út kitölti.
+  const endMs = r.ended_at ? Date.parse(r.ended_at) : Date.now();
+  const maxX = Math.max((endMs - start) / 3600000, last ? last.x : 0, 0.1);
   ds.push({ label: 'Kiforgatható (100%)', data: [{ x: 0, y: 100 }, { x: maxX, y: 100 }], borderColor: '#2e9e5b',
     borderWidth: 2, pointRadius: 0, fill: false });
   return new Chart(canvas, {

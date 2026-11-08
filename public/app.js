@@ -370,61 +370,19 @@ $('#run-form').addEventListener('submit', async (e) => {
   f.hidden = true; f.reset(); toast('Kötés elindítva'); loadCuring();
 });
 
-// --- Raklapcímke (384×240, 1 bites) ---
-function drawPalletLabel(p) {
-  const c = $('#label-canvas');
-  const g = c.getContext('2d');
-  const W = c.width, H = c.height;
-  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
-  g.fillStyle = '#000'; g.strokeStyle = '#000';
-  // A keret és a fejléc a címke széléig ér (a kalibráció szerint a 0. pont a címke bal széle).
-  g.lineWidth = 4; g.strokeRect(2, 2, W - 4, H - 4);
-  const font = (px, w = 'bold') => `${w} ${px}px "DejaVu Sans", Verdana, Arial, sans-serif`;
-
-  // Fejléc sáv
-  g.fillRect(0, 0, W, 44);
-  g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.textAlign = 'left';
-  g.font = font(24); g.fillText('JEDBET', 14, 23);
-  g.textAlign = 'right'; g.font = font(18); g.fillText(`${p.panel_count} db`, W - 14, 23);
-  g.fillStyle = '#000';
-
-  // QR: a sorszám keresését nyitja meg a gyártási oldalon
-  const qr = qrcode(0, 'M'); qr.addData(`${location.origin}/#s=${p.serial}`); qr.make();
-  const n = qr.getModuleCount(), size = 108, cell = Math.max(1, Math.floor(size / n)), off = Math.floor((size - cell * n) / 2);
-  for (let r = 0; r < n; r++) for (let col = 0; col < n; col++) {
-    if (qr.isDark(r, col)) g.fillRect(14 + off + col * cell, 58 + off + r * cell, cell, cell);
-  }
-
-  const x = 134, maxW = W - x - 12;
-  g.textAlign = 'left'; g.textBaseline = 'top';
-  let px = 30; g.font = font(px);
-  while (g.measureText(p.serial).width > maxW && px > 14) { px--; g.font = font(px); }
-  g.fillText(p.serial, x, 56);
-  const fit = (text, y, size = 18) => { let s = size; g.font = font(s); while (g.measureText(text).width > maxW && s > 11) { s--; g.font = font(s); } g.fillText(text, x, y); };
-  fit(p.template, 96, 22);
-  g.font = font(14, 'normal'); g.fillText('Öntve', x, 128);
-  g.font = font(16); g.fillText(p.label.poured, x, 145);
-  g.font = font(14, 'normal'); g.fillText('Kiforgatva', x, 170);
-  g.font = font(16); g.fillText(p.label.demolded, x, 187);
-
-  const img = g.getImageData(0, 0, W, H);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const v = img.data[i] * 0.3 + img.data[i + 1] * 0.59 + img.data[i + 2] * 0.11 < 140 ? 0 : 255;
-    img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255;
-  }
-  g.putImageData(img, 0, 0);
-  return c.toDataURL('image/png');
+// A címkét a Pi rajzolja ki (élesebb, mint a böngésző élsimított szövege);
+// innen csak a QR-kód mintája megy, a többi adat az adatbázisból.
+function qrMatrix(text) {
+  const qr = qrcode(0, 'M'); qr.addData(text); qr.make();
+  const n = qr.getModuleCount(), rows = [];
+  for (let r = 0; r < n; r++) { let line = ''; for (let c = 0; c < n; c++) line += qr.isDark(r, c) ? '1' : '0'; rows.push(line); }
+  return rows;
 }
 
-const huDateTime = (iso) => new Date(iso).toLocaleString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-
 async function printPalletLabel(p) {
-  const label = p.label || { poured: huDateTime(p.poured_at), demolded: huDateTime(p.demolded_at) };
-  const png = drawPalletLabel({ ...p, label });
-  await api(`/api/pallets/${p.id}/print`, { method: 'POST', body: { png_base64: png } });
+  await api(`/api/pallets/${p.id}/print`, { method: 'POST', body: { qr: qrMatrix(`${location.origin}/#s=${p.serial}`) } });
   toast(`${p.serial} – címke a nyomtatási sorban`);
   setTimeout(loadStatus, 4000);
-  return png;
 }
 
 // --- Raklap-adatlap (keresés / QR) ---

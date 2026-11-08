@@ -178,8 +178,14 @@ def handle_print(job):
     ok, err = False, ""
     fd, path = tempfile.mkstemp(suffix=".png")
     try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(base64.b64decode(job["png_base64"]))
+        if job.get("spec"):
+            # A címkét itt rajzoljuk ki, a nyomtató felbontásán, élsimítás nélkül.
+            import label_render
+            os.close(fd)
+            label_render.render(job["spec"]).save(path)
+        else:
+            with os.fdopen(fd, "wb") as f:
+                f.write(base64.b64decode(job["png_base64"]))
         res = subprocess.run(["python3", CFG["NIIMCTL"], "-p", CFG["PRINTER_PORT"], "-i", path],
                              cwd=os.path.dirname(CFG["NIIMCTL"]), capture_output=True, text=True, timeout=90)
         ok = res.returncode == 0

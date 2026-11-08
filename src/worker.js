@@ -390,12 +390,22 @@ async function routeApi(request, env, url, user) {
     await db.prepare('UPDATE pallets SET status = ?, note = ? WHERE id = ?').bind(status, note, cur.id).run();
     return json({ ok: true });
   }
+  // A címkét a Pi rajzolja ki élesen (Pillow, élsimítás nélkül). Az adatok az adatbázisból jönnek,
+  // a böngésző csak a QR-kód mintáját küldi.
   if ((r = p.match(/^\/api\/pallets\/(\d+)\/print$/)) && m === 'POST') {
     const b = await body(request);
-    const png = decodePng(b.png_base64);
-    const pl = await db.prepare('SELECT id FROM pallets WHERE id = ?').bind(+r[1]).first();
+    const pl = await db.prepare('SELECT * FROM pallets WHERE id = ?').bind(+r[1]).first();
     if (!pl) notFound();
-    const row = await db.prepare('INSERT INTO print_jobs (pallet_id, png) VALUES (?, ?) RETURNING id').bind(pl.id, png).first();
+    const qr = Array.isArray(b.qr) ? b.qr : [];
+    if (!qr.length || qr.length > 177 || qr.some((row) => typeof row !== 'string' || row.length !== qr.length || /[^01]/.test(row))) {
+      bad('Hibás QR-minta');
+    }
+    const spec = {
+      kind: 'pallet', serial: pl.serial, template: pl.template, panel_count: pl.panel_count,
+      poured: localDateTime(new Date(pl.poured_at)), demolded: localDateTime(new Date(pl.demolded_at)), qr,
+    };
+    const row = await db.prepare(`INSERT INTO print_jobs (pallet_id, png, spec) VALUES (?, X'', ?) RETURNING id`)
+      .bind(pl.id, JSON.stringify(spec)).first();
     return json({ print_job_id: row.id });
   }
 
@@ -663,8 +673,9 @@ async function routeDevice(request, env, url) {
        WHERE id = (SELECT id FROM print_jobs
                    WHERE (status = 'pending' OR (status = 'printing' AND updated_at < strftime('%Y-%m-%dT%H:%M:%SZ','now','-2 minutes')))
                      AND attempts < 3 ORDER BY id LIMIT 1)
-       RETURNING id, png`).first();
+       RETURNING id, png, spec`).first();
     if (!job) return new Response(null, { status: 204 });
+    if (job.spec) return json({ id: job.id, spec: JSON.parse(job.spec) });
     const bytes = new Uint8Array(job.png);
     let bin = '';
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));

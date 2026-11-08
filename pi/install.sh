@@ -11,6 +11,9 @@ cd "$(dirname "$0")"
 
 install -m 755 jedbet_agent.py "$DIR/jedbet_agent.py"
 install -m 755 niimbot_b1.py "$DIR/niimbot_b1.py"
+install -m 644 label_render.py "$DIR/label_render.py"
+# Betűtípus a címkéhez (ha nincs fent)
+[ -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf ] || sudo apt-get install -y fonts-dejavu-core
 PRINTER_MAC=${PRINTER_MAC:-05:23:0A:A5:90:6C}
 
 if [ ! -f "$ENV_FILE" ]; then

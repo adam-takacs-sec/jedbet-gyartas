@@ -380,7 +380,7 @@ function qrMatrix(text) {
 }
 
 async function printPalletLabel(p) {
-  const { print_job_id: id } = await api(`/api/pallets/${p.id}/print`, { method: 'POST', body: { qr: qrMatrix(`${location.origin}/#s=${p.serial}`) } });
+  const { print_job_id: id } = await api(`/api/pallets/${p.id}/print`, { method: 'POST', body: { qr: qrMatrix(`${location.origin}/?s=${encodeURIComponent(p.serial)}`) } });
   toast(`${p.serial} – címke elküldve a Pi-nek…`);
   // Figyeljük a munkát, amíg a Pi vissza nem jelez (legfeljebb ~1,5 percig).
   for (let i = 0; i < 30; i++) {
@@ -406,7 +406,7 @@ $('#search-form').addEventListener('submit', (e) => {
 $('#pd-close').addEventListener('click', () => $('#pallet-dialog').close());
 $('#pallet-dialog').addEventListener('close', () => {
   state.dialogChart?.destroy(); state.dialogChart = null;
-  if (location.hash.startsWith('#s=')) history.replaceState(null, '', location.pathname);
+  if (location.search.includes('s=') || location.hash.startsWith('#s=')) history.replaceState(null, '', location.pathname);
 });
 
 async function openPallet(serial) {
@@ -441,7 +441,7 @@ async function openPallet(serial) {
     </div>`;
   const dlg = $('#pallet-dialog');
   if (!dlg.open) dlg.showModal();
-  history.replaceState(null, '', `#s=${encodeURIComponent(p.serial)}`);
+  history.replaceState(null, '', `?s=${encodeURIComponent(p.serial)}`);
   if (r && typeof Chart !== 'undefined') { state.dialogChart?.destroy(); state.dialogChart = curingChart($('#pd-chart'), r); }
   $('#pd-save').onclick = async () => {
     await api(`/api/pallets/${p.id}`, { method: 'PATCH', body: { status: $('#pd-status').value, note: $('#pd-note').value } });
@@ -614,7 +614,9 @@ async function loadWeather() {
   try { tab = localStorage.getItem('tab') || tab; } catch {}
   if (!$(`.tabs button[data-tab="${tab}"]`) || $(`.tabs button[data-tab="${tab}"]`).hidden) tab = 'erleles';
   showTab(tab);
-  const m = location.hash.match(/^#s=(.+)$/);
+  // ?s=… (új címkék; a Cloudflare-belépés után is megmarad) vagy #s=… (régi címkék)
+  const qs = new URLSearchParams(location.search).get('s');
+  const m = qs ? [null, qs] : location.hash.match(/^#s=(.+)$/);
   if (m) openPallet(decodeURIComponent(m[1]));
   loadStatus(); loadWeather();
   setInterval(loadStatus, 30000);

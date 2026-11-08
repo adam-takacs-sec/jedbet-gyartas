@@ -528,6 +528,11 @@ async function routeApi(request, env, url, user) {
     }
     return json({ ok: true });
   }
+  if ((r = p.match(/^\/api\/print-jobs\/(\d+)$/)) && m === 'GET') {
+    const job = await db.prepare('SELECT id, status, error, attempts, updated_at FROM print_jobs WHERE id = ?').bind(+r[1]).first();
+    if (!job) notFound();
+    return json(job);
+  }
   if (p === '/api/print-jobs' && m === 'GET') {
     const { results } = await db.prepare(
       `SELECT pj.id, pj.status, pj.error, pj.attempts, pj.created_at, pj.updated_at, COALESCE(pl.serial, p.serial) AS serial

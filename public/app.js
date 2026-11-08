@@ -380,9 +380,21 @@ function qrMatrix(text) {
 }
 
 async function printPalletLabel(p) {
-  await api(`/api/pallets/${p.id}/print`, { method: 'POST', body: { qr: qrMatrix(`${location.origin}/#s=${p.serial}`) } });
-  toast(`${p.serial} – címke a nyomtatási sorban`);
-  setTimeout(loadStatus, 4000);
+  const { print_job_id: id } = await api(`/api/pallets/${p.id}/print`, { method: 'POST', body: { qr: qrMatrix(`${location.origin}/#s=${p.serial}`) } });
+  toast(`${p.serial} – címke elküldve a Pi-nek…`);
+  // Figyeljük a munkát, amíg a Pi vissza nem jelez (legfeljebb ~1,5 percig).
+  for (let i = 0; i < 30; i++) {
+    await new Promise((res) => setTimeout(res, 3000));
+    const j = await api(`/api/print-jobs/${id}`, { quiet: true }).catch(() => null);
+    if (!j) continue;
+    if (j.status === 'done') { toast(`${p.serial} – kinyomtatva`); loadStatus(); return; }
+    if (j.status === 'error') {
+      const last = (j.error || '').trim().split('\n').pop();
+      toast(`${p.serial} – nyomtatási hiba: ${last || 'ismeretlen'}`, true); loadStatus(); return;
+    }
+  }
+  toast(`${p.serial} – a Pi nem jelzett vissza. Be van kapcsolva a Pi és a nyomtató?`, true);
+  loadStatus();
 }
 
 // --- Raklap-adatlap (keresés / QR) ---

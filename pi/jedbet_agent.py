@@ -6,7 +6,7 @@ Két dolgot csinál, mást semmit:
      gyártási oldalnak. Ha nincs net, a mérés egy helyi SQLite-pufferben vár,
      és visszatöltődik, amint újra van kapcsolat.
   2. Pár másodpercenként megnézi, van-e nyomtatandó címke, és ha van,
-     kinyomtatja a niimctl.py-jal.
+     kinyomtatja a niimbot_b1.py-jal.
 
 Csak kifelé kapcsolódik (HTTPS), nem nyit portot. Csak a Python standard
 könyvtárát használja.
@@ -14,8 +14,8 @@ könyvtárát használja.
 Beállítás: /home/admin/jedbet-agent.env
   API_URL=https://jedbet.xyz
   DEVICE_TOKEN=...
-  PRINTER_PORT=/dev/ttyACM0        (opcionális)
-  NIIMCTL=/home/admin/niimprint_1/niimctl.py   (opcionális)
+  PRINTER_PORT=/dev/rfcomm0        (opcionális; USB-n /dev/ttyACM0)
+  NIIMCTL=/home/admin/niimbot_b1.py   (opcionális)
 """
 import base64
 import glob
@@ -59,8 +59,8 @@ def load_env():
         if not cfg.get(k):
             sys.exit(f"Hiányzik a(z) {k} a {ENV_FILE} fájlból")
     cfg["API_URL"] = cfg["API_URL"].rstrip("/")
-    cfg.setdefault("PRINTER_PORT", "/dev/ttyACM0")
-    cfg.setdefault("NIIMCTL", os.path.join(HOME, "niimprint_1", "niimctl.py"))
+    cfg.setdefault("PRINTER_PORT", "/dev/rfcomm0")
+    cfg.setdefault("NIIMCTL", os.path.join(HOME, "niimbot_b1.py"))
     return cfg
 
 

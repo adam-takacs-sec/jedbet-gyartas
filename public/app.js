@@ -389,12 +389,12 @@ function drawPalletLabel(p) {
 
   // QR: a sorszám keresését nyitja meg a gyártási oldalon
   const qr = qrcode(0, 'M'); qr.addData(`${location.origin}/#s=${p.serial}`); qr.make();
-  const n = qr.getModuleCount(), size = 116, cell = Math.max(1, Math.floor(size / n)), off = Math.floor((size - cell * n) / 2);
+  const n = qr.getModuleCount(), size = 108, cell = Math.max(1, Math.floor(size / n)), off = Math.floor((size - cell * n) / 2);
   for (let r = 0; r < n; r++) for (let col = 0; col < n; col++) {
     if (qr.isDark(r, col)) g.fillRect(14 + off + col * cell, 58 + off + r * cell, cell, cell);
   }
 
-  const x = 146, maxW = W - x - 14;
+  const x = 134, maxW = W - x - 12;
   g.textAlign = 'left'; g.textBaseline = 'top';
   let px = 30; g.font = font(px);
   while (g.measureText(p.serial).width > maxW && px > 14) { px--; g.font = font(px); }

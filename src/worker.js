@@ -42,30 +42,46 @@ export default {
 
 const STATION_SENSOR = 'nubila-allomas';
 
+// A saját állomás legfrissebb mérése az eszköz sorozatszáma alapján:
+//   GET https://api.nubila.ai/api/v1/weather/device/{SN}?limit=1   (Authorization: Bearer <token>)
+// A token a Nubila-fiók bejelentkezési tokenje (JWT, kb. 90 napig él), ezért a lejáratát is visszaadjuk.
 async function fetchNubila(env) {
-  const key = env.NUBILA_API_KEY;
-  if (!key) return null;
-  const url = `https://api.nubila.ai/api/v1/weather?lat=${SITE.lat}&lon=${SITE.lon}`;
-  let res = await fetch(url, { headers: { 'X-Api-Key': key } }).catch(() => null);
-  // A régi rendszer Bearer-tokennel hívta; ha a kulcs ilyen, azzal is próbálkozunk.
-  if (res && res.status === 401) res = await fetch(url, { headers: { Authorization: `Bearer ${key}` } }).catch(() => null);
-  if (!res || !res.ok) return { error: res ? `Nubila hiba (${res.status})` : 'Nubila nem elérhető' };
+  const token = (env.NUBILA_TOKEN || '').trim();
+  const sn = (env.NUBILA_DEVICE_SN || '').trim();
+  if (!token || !sn) return { error: 'Nincs beállítva a NUBILA_TOKEN vagy a NUBILA_DEVICE_SN' };
+  const token_expires = jwtExp(token);
+  if (token_expires && Date.parse(token_expires) < Date.now()) return { error: 'Lejárt a Nubila-token', token_expires };
+  const res = await fetch(`https://api.nubila.ai/api/v1/weather/device/${encodeURIComponent(sn)}?limit=1`,
+    { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+  if (!res || !res.ok) {
+    return { error: res ? (res.status === 401 ? 'A Nubila elutasította a tokent' : `Nubila hiba (${res.status})`) : 'Nubila nem elérhető', token_expires };
+  }
   const body = await res.json().catch(() => null);
-  const d = body?.data && typeof body.data === 'object' ? body.data : body;
-  if (!d || !Number.isFinite(d.temperature)) return { error: 'Nubila: nincs mérés a válaszban' };
+  const d = Array.isArray(body?.data) ? body.data[0] : Array.isArray(body) ? body[0] : body?.data;
+  if (!d || !Number.isFinite(Number(d.temperature))) return { error: 'Nubila: nincs mérés a válaszban', token_expires };
+  const n = (v) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
   return {
-    temp: d.temperature, humidity: d.humidity ?? null, wind_speed: d.wind_speed ?? null,
-    wind_direction: d.wind_direction ?? null, pressure: d.pressure ?? null, rain: d.rain ?? null,
-    online: d.is_online ?? null, malfunction: d.is_malfunction ?? null,
-    location: d.location_name || d.address || '', ts: d.timestamp ? new Date(d.timestamp * (d.timestamp < 1e12 ? 1000 : 1)).toISOString() : null,
+    temp: Number(d.temperature), humidity: n(d.humidity), wind_speed: n(d.wind_speed),
+    wind_direction: n(d.wind_direction), pressure: n(d.pressure), rain: n(d.rain),
+    ts: d.created_at ? new Date(d.created_at).toISOString() : null,
+    token_expires,
   };
+}
+
+function jwtExp(token) {
+  try {
+    const p = JSON.parse(b64urlText(token.split('.')[1]));
+    return p.exp ? new Date(p.exp * 1000).toISOString() : null;
+  } catch { return null; }
 }
 
 async function logStation(env) {
   const w = await fetchNubila(env);
   if (!w || w.error) { if (w) console.warn(w.error); return; }
-  const ts = new Date();
+  // Az állomás saját mérési idejét használjuk, így ugyanazt a mérést nem mentjük kétszer.
+  const ts = new Date(w.ts || Date.now());
   ts.setUTCSeconds(0, 0);
+  if (Date.now() - ts.getTime() > 60 * 60000) { console.warn('Nubila: elavult mérés', w.ts); return; }
   await env.DB.batch([
     env.DB.prepare(`INSERT OR IGNORE INTO sensors (id, label, role) VALUES (?, 'Nubila állomás', 'air')`).bind(STATION_SENSOR),
     env.DB.prepare('INSERT OR IGNORE INTO readings (sensor_id, ts, temp) VALUES (?,?,?)')
@@ -407,10 +423,11 @@ async function routeApi(request, env, url, user) {
         { cf: { cacheTtl: 600, cacheEverything: true } }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     const temps = fc?.hourly?.temperature_2m?.slice(0, 72) || [];
-    if ((!station || station.error) && !temps.length) throw new HttpError(502, station?.error || 'Időjárás nem elérhető');
+    if (station.error && !temps.length) throw new HttpError(502, station.error);
     return json({
-      station: station && !station.error ? station : null,
-      station_error: station?.error || (station ? null : 'Nincs Nubila-kulcs beállítva'),
+      station: station.error ? null : station,
+      station_error: station.error || null,
+      token_expires: station.token_expires || null,
       min_next_72h: temps.length ? Math.min(...temps) : null,
     });
   }

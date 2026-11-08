@@ -24,7 +24,9 @@
   // A dashboardon beállított változók (ACCESS_TEAM_DOMAIN, ACCESS_AUD) és a DEVICE_TOKEN titok
   // deploynál megmaradnak.
   "keep_vars": true,
-  // A Nubila-állomás hőmérsékletének mentése (NUBILA_API_KEY titok kell hozzá).
+  // A saját Nubila-állomás sorozatszáma. A tokent (NUBILA_TOKEN) titokként kell felvenni.
+  "vars": { "NUBILA_DEVICE_SN": "29322533200527534" },
+  // A Nubila-állomás hőmérsékletének mentése (NUBILA_TOKEN titok kell hozzá).
   "triggers": { "crons": ["*/10 * * * *"] },
   "observability": { "enabled": true }
 }

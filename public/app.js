@@ -442,14 +442,18 @@ async function loadWeather() {
       parts.push(`Állomás: ${fmt(s.temp, 1)} °C`);
       if (s.humidity !== null) parts.push(`${fmt(s.humidity, 0)}%`);
       if (s.wind_speed !== null) parts.push(`szél ${fmt(s.wind_speed, 1)} m/s`);
-      if (s.online === false || s.malfunction === true) parts.push('⚠ állomás hiba');
+      if (s.ts && Date.now() - Date.parse(s.ts) > 30 * 60000) parts.push(`⚠ utolsó mérés ${ago(s.ts)}`);
     } else {
-      parts.push('Állomás: nincs adat');
+      parts.push(`Állomás: ${w.station_error || 'nincs adat'}`);
     }
     if (w.min_next_72h !== null) parts.push(`3 napos min. ${fmt(w.min_next_72h, 0)} °C`);
+    const daysLeft = w.token_expires ? (Date.parse(w.token_expires) - Date.now()) / 86400000 : null;
+    if (daysLeft !== null && daysLeft < 10) parts.push(daysLeft < 0 ? '⚠ Nubila-token lejárt' : `⚠ Nubila-token ${Math.ceil(daysLeft)} nap múlva lejár`);
     el.textContent = parts.join(' · ');
-    el.title = s ? `${s.location || 'Nubila'}${s.ts ? ' · ' + fmtTime(s.ts) : ''}` : (w.station_error || '');
-    el.className = 'pill ' + (w.min_next_72h !== null && w.min_next_72h < 0 ? 'bad' : w.min_next_72h !== null && w.min_next_72h < 5 ? 'warn' : '');
+    el.title = s?.ts ? `Nubila mérés: ${fmtTime(s.ts)}` : '';
+    const tokenWarn = daysLeft !== null && daysLeft < 10;
+    el.className = 'pill ' + (!s || (w.min_next_72h !== null && w.min_next_72h < 0) ? 'bad'
+      : tokenWarn || (w.min_next_72h !== null && w.min_next_72h < 5) ? 'warn' : '');
   } catch {}
 }
 

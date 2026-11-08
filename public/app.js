@@ -348,34 +348,77 @@ function curingChartSimple(canvas, r) {
   });
 }
 
+// Mozgóátlag a megjelenítéshez (a DS18B20 0,06 °C-os lépései és a zaj ne fűrészfogként látszódjanak).
+function smooth(points, windowH = 0.5) {
+  const out = [];
+  let lo = 0, sum = 0;
+  for (let i = 0; i < points.length; i++) {
+    sum += points[i].y;
+    while (points[i].x - points[lo].x > windowH) { sum -= points[lo].y; lo++; }
+    out.push({ x: points[i].x, y: sum / (i - lo + 1) });
+  }
+  return out;
+}
+
+const SENSOR_COLORS = ['#d62828', '#3d8fd1', '#2e9e5b', '#d99a1e', '#9b59b6', '#8f9296'];
+
+// Részletes nézet: két grafikon egymás alatt, közös színekkel és egy jelmagyarázattal.
 function curingChartDetail(canvas, r) {
   const start = Date.parse(r.started_at);
-  const colors = ['#d62828', '#3d8fd1', '#2e9e5b', '#d99a1e', '#9b59b6', '#8f9296'];
-  const ds = [];
+  const ink = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+  const grid = getComputedStyle(document.documentElement).getPropertyValue('--line').trim();
+  const endMs = r.ended_at ? Date.parse(r.ended_at) : Date.now();
+  const maxX = Math.max((endMs - start) / 3600000, 0.1);
+  const hx = (ts) => (Date.parse(ts) - start) / 3600000;
+  const tempDs = [], teDs = [];
   r.sensors.forEach((s, i) => {
-    const pts = (s.series || []).map((p) => ({ x: (Date.parse(p.ts) - start) / 3600000, y: p.temp }));
-    ds.push({ label: `${s.label} °C`, data: pts, borderColor: colors[i % colors.length], backgroundColor: colors[i % colors.length],
-      yAxisID: 'y', pointRadius: 0, borderWidth: 2, tension: .2, borderDash: s.role === 'air' ? [6, 4] : [] });
+    const col = SENSOR_COLORS[i % SENSOR_COLORS.length];
+    const pts = (s.series || []).map((p) => ({ x: hx(p.ts), y: p.temp }));
+    tempDs.push({ label: s.role === 'air' ? `${s.label} (levegő)` : s.label, data: smooth(pts), borderColor: col, backgroundColor: col,
+      borderWidth: 2, pointRadius: 0, cubicInterpolationMode: 'monotone', borderDash: s.role === 'air' ? [6, 4] : [] });
     if (s.role === 'specimen') {
-      ds.push({ label: `${s.label} egyenértékű kor`, data: (s.series || []).map((p) => ({ x: (Date.parse(p.ts) - start) / 3600000, y: p.te })),
-        borderColor: colors[i % colors.length], yAxisID: 'y2', pointRadius: 0, borderWidth: 1, borderDash: [2, 3] });
+      teDs.push({ label: s.label, data: (s.series || []).map((p) => ({ x: hx(p.ts), y: p.te })), borderColor: col, backgroundColor: col,
+        borderWidth: 2, pointRadius: 0, cubicInterpolationMode: 'monotone' });
     }
   });
-  const ink = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
-  return new Chart(canvas, {
-    type: 'line', data: { datasets: ds },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
-      interaction: { mode: 'nearest', axis: 'x', intersect: false },
-      scales: {
-        x: { type: 'linear', title: { display: true, text: 'óra az öntés óta', color: ink }, ticks: { color: ink } },
-        y: { title: { display: true, text: '°C', color: ink }, ticks: { color: ink } },
-        y2: { position: 'right', min: 0, suggestedMax: r.target_te_h * 1.1, grid: { display: false },
-          title: { display: true, text: 'egyenértékű kor (óra)', color: ink }, ticks: { color: ink } },
-      },
-      plugins: { legend: { labels: { color: ink, boxWidth: 12 } } },
+  teDs.push({ label: 'Küszöb', data: [{ x: 0, y: r.target_te_h }, { x: maxX, y: r.target_te_h }], borderColor: ink,
+    borderWidth: 1, borderDash: [4, 4], pointRadius: 0 });
+
+  const base = (yTitle, extraY = {}) => ({
+    responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+    scales: {
+      x: { type: 'linear', min: 0, max: maxX, grid: { display: false },
+        ticks: { color: ink, callback: (v) => (Number.isInteger(v) ? v : '') } },
+      y: { grace: '10%', grid: { color: grid }, border: { display: false },
+        title: { display: true, text: yTitle, color: ink }, ticks: { color: ink, maxTicksLimit: 6 }, ...extraY },
     },
   });
+
+  const c1 = new Chart(canvas, {
+    type: 'line', data: { datasets: tempDs },
+    options: { ...base('°C'), plugins: {
+      legend: { position: 'top', labels: { color: ink, boxWidth: 12, boxHeight: 3 } },
+      tooltip: { callbacks: { title: (it) => `${fmt(it[0].parsed.x, 1)} óra`, label: (c) => `${c.dataset.label}: ${fmt(c.parsed.y, 1)} °C` } },
+    } },
+  });
+
+  // A második grafikon a hőmérséklet alá kerül.
+  const box = document.createElement('div');
+  box.className = 'chart-box chart-box--sub';
+  const cv2 = document.createElement('canvas');
+  box.appendChild(cv2);
+  canvas.parentElement.after(box);
+  const o2 = base('egyenértékű kor (óra)', { min: 0, suggestedMax: r.target_te_h * 1.05 });
+  o2.scales.x.title = { display: true, text: 'óra az öntés óta', color: ink };
+  const c2 = new Chart(cv2, {
+    type: 'line', data: { datasets: teDs },
+    options: { ...o2, plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { title: (it) => `${fmt(it[0].parsed.x, 1)} óra`, label: (c) => `${c.dataset.label}: ${fmt(c.parsed.y, 1)} óra` } },
+    } },
+  });
+  return { destroy() { c1.destroy(); c2.destroy(); box.remove(); } };
 }
 
 async function openRunChart(id) {

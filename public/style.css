@@ -180,3 +180,4 @@ form.demold { margin-top: 12px; }
 .seg button[aria-pressed="true"] { background: var(--red); color: #fff; }
 .kv.big { font-size: 1.05rem; gap: 6px 24px; }
 .kv.big b { font-size: 1.35rem; }
+.chart-box--sub { height: 200px; margin-top: 4px; }

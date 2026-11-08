@@ -46,7 +46,8 @@ for s in beton_monitor jedbet concrete cloudflared; do
   sudo systemctl disable --now "$s.service" 2>/dev/null || true
 done
 sudo systemctl daemon-reload
-sudo systemctl enable --now jedbet-agent.service
+sudo systemctl enable jedbet-agent.service
+sudo systemctl restart jedbet-agent.service
 
 echo
 echo "Kész. Napló: journalctl -u jedbet-agent -f"

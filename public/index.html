@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="hu">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>JEDBET Gyártás</title>
+  <link rel="icon" href="/JEDBET-pecset-sotet.svg" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="top">
+    <img src="/JEDBET-logo-kompakt-sotet.svg" alt="JEDBET" class="logo" />
+    <div class="status" id="status">
+      <span class="pill" id="st-pi">Pi: …</span>
+      <span class="pill" id="st-weather">Kint: …</span>
+      <span class="pill" id="st-print" hidden></span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="gyartas" aria-selected="true">Gyártás</button>
+    <button role="tab" data-tab="erleles">Érlelés</button>
+    <button role="tab" data-tab="raktar">Raktár</button>
+    <button role="tab" data-tab="munkak">Munkák</button>
+  </nav>
+
+  <main>
+    <!-- GYÁRTÁS -->
+    <section id="tab-gyartas" class="tab">
+      <div class="grid2">
+        <form class="card" id="mix-form">
+          <h2>1. Keverés</h2>
+          <div class="qty-grid">
+            <label>Cement (kg)<span class="qty"><button type="button" data-step="-5">−</button><input name="cement" type="number" inputmode="decimal" value="50" min="0" step="any"><button type="button" data-step="5">+</button></span></label>
+            <label>Víz (l)<span class="qty"><button type="button" data-step="-1">−</button><input name="viz" type="number" inputmode="decimal" value="20" min="0" step="any"><button type="button" data-step="1">+</button></span></label>
+            <label>Kavics (lapát)<span class="qty"><button type="button" data-step="-1">−</button><input name="kavics" type="number" inputmode="decimal" value="40" min="0" step="any"><button type="button" data-step="1">+</button></span></label>
+            <label>Folyósító (ml)<span class="qty"><button type="button" data-step="-10">−</button><input name="folyosito" type="number" inputmode="decimal" value="100" min="0" step="any"><button type="button" data-step="10">+</button></span></label>
+            <label>Kalcidur (ml)<span class="qty"><button type="button" data-step="-10">−</button><input name="kalcidur" type="number" inputmode="decimal" value="100" min="0" step="any"><button type="button" data-step="10">+</button></span></label>
+          </div>
+          <div class="row3">
+            <label>Roskadás (mm)<input name="roskadas" type="number" inputmode="decimal" value="0" min="0"></label>
+            <label>Terülés (mm)<input name="terules" type="number" inputmode="decimal" value="0" min="0"></label>
+          </div>
+          <label>Megjegyzés<input name="note" type="text" maxlength="500"></label>
+          <button class="btn primary big" type="submit">Keverés rögzítése</button>
+        </form>
+
+        <div class="card" id="pour-card">
+          <h2>2. Öntés és címke</h2>
+          <p class="muted" id="active-mix">Nincs kiválasztott keverés. Rögzíts egyet, vagy válassz lent.</p>
+          <form id="pour-form">
+            <label>Sablon / minta<select name="template" id="pour-template"></select></label>
+            <label>Extra víz (dl)<span class="qty"><button type="button" data-step="-1">−</button><input name="extra_water_dl" type="number" inputmode="decimal" value="0" min="0" step="any"><button type="button" data-step="1">+</button></span></label>
+            <label>Megjegyzés<input name="note" type="text" maxlength="500"></label>
+            <label class="check"><input type="checkbox" name="print" checked> Címke nyomtatása</label>
+            <button class="btn success big" type="submit" disabled id="pour-submit">Darab mentése</button>
+          </form>
+          <div id="pours-of-mix" class="list"></div>
+          <canvas id="label-canvas" width="384" height="240" class="label-preview" hidden></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Legutóbbi keverések</h2>
+        <div class="table-wrap"><table id="mix-table"><thead><tr><th>#</th><th>Idő</th><th>Cement</th><th>Víz</th><th>Kavics</th><th>Foly.</th><th>Kalc.</th><th>Rosk.</th><th>Darab</th><th></th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- ÉRLELÉS -->
+    <section id="tab-erleles" class="tab" hidden>
+      <div class="card">
+        <h2>Szenzorok most</h2>
+        <div id="sensor-cards" class="sensor-grid"></div>
+        <details class="sub">
+          <summary>Szenzorok beállítása (név, szerep, kalibrációs eltolás)</summary>
+          <div id="sensor-settings"></div>
+          <p class="muted small">Eltolás: a jeges vizes (0 °C) próbánál mért érték ellentettje. Ha a szenzor 0 °C-on 0,4 °C-ot mutat, az eltolás −0,4.</p>
+        </details>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Érlelések</h2><button class="btn primary" id="new-run-btn">Új érlelés indítása</button></div>
+        <form id="run-form" class="sub" hidden>
+          <label>Név<input name="name" required maxlength="120" placeholder="pl. Hétfői öntés, A csoport"></label>
+          <label>Keverés (opcionális)<select name="mix_id" id="run-mix"><option value="">—</option></select></label>
+          <fieldset><legend>Szenzorok</legend><div id="run-sensors" class="checks"></div></fieldset>
+          <label>Kiforgatási küszöb (egyenértékű kor, óra 20 °C-on)<input name="target_te_h" type="number" value="48" min="1" step="any"></label>
+          <label>Kezdés<input name="started_at" type="datetime-local"></label>
+          <div class="row-btns"><button class="btn primary" type="submit">Indítás</button><button class="btn" type="button" id="run-cancel">Mégse</button></div>
+        </form>
+        <div id="runs"></div>
+      </div>
+      <p class="muted small explain">
+        A döntést a <b>legkevésbé érett próbatest</b> adja. Az <b>egyenértékű kor</b> azt mutatja, hány órát töltött volna a beton 20 °C-on (Arrhenius, Freiesleben Hansen). A Nurse–Saul (T₀ = −10 °C) összehasonlításként látszik; hidegben túl optimista. A küszöb addig becslés, amíg nincs laboros kalibráció.
+      </p>
+    </section>
+
+    <!-- RAKTÁR -->
+    <section id="tab-raktar" class="tab" hidden>
+      <div class="grid2">
+        <div class="card">
+          <h2>Alapanyagok</h2>
+          <div id="stock"></div>
+          <form id="stock-form" class="row3">
+            <label>Anyag<select name="material" id="stock-material"></select></label>
+            <label>Bevét (+) / korrekció (−)<input name="delta" type="number" step="any" required></label>
+            <button class="btn primary" type="submit">Könyvelés</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>Késztermék</h2>
+          <div id="products"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Darabok</h2>
+        <div class="filters"><select id="pour-filter"></select></div>
+        <div class="table-wrap"><table id="pour-table"><thead><tr><th>Sorszám</th><th>Sablon</th><th>Öntve</th><th>Státusz</th><th></th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- MUNKÁK -->
+    <section id="tab-munkak" class="tab" hidden>
+      <div class="grid2">
+        <div class="card">
+          <h2>Projektek</h2>
+          <div id="jobs" class="list"></div>
+          <details class="sub">
+            <summary>Új projekt</summary>
+            <form id="job-form">
+              <label>Projekt neve<input name="name" required maxlength="120"></label>
+              <label>Megrendelő<input name="client_name" maxlength="120"></label>
+              <label>Telefon<input name="phone" type="tel" maxlength="40"></label>
+              <label>Helyszín<input name="location" maxlength="200"></label>
+              <label>Határidő<input name="deadline" type="date"></label>
+              <button class="btn primary" type="submit">Létrehozás</button>
+            </form>
+          </details>
+        </div>
+        <div class="card" id="job-detail" hidden>
+          <div class="card-head"><h2 id="jd-name"></h2><button class="btn" id="jd-status"></button></div>
+          <p class="muted" id="jd-meta"></p>
+          <h3>Szakaszok</h3>
+          <div id="jd-stages" class="list"></div>
+          <form id="stage-form" class="row3">
+            <label>Szakasz<input name="stage_name" required maxlength="120" placeholder="pl. Utcafront"></label>
+            <label>Hossz (m)<input name="length_m" type="number" step="any" min="0.5" required></label>
+            <label>Minta<select name="template" id="stage-template"></select></label>
+            <label class="span3">Megjegyzés<input name="note" maxlength="500"></label>
+            <button class="btn primary" type="submit">Szakasz hozzáadása</button>
+          </form>
+          <h3>Anyagigény és raktár</h3>
+          <div class="table-wrap"><table id="jd-summary"><thead><tr><th>Tétel</th><th class="num">Kell</th><th class="num">Raktáron</th><th class="num">Hiányzik</th></tr></thead><tbody></tbody></table></div>
+          <p class="muted small">2 m = 1 oszlopköz = 4 panel. Szakaszonként 2 végoszlop, közte középoszlopok.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/vendor/qrcode.js"></script>
+  <script src="/vendor/chart.umd.js"></script>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

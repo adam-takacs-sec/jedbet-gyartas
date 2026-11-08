@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jedbet-gyartas",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-01",
+  // Csak a saját domainen érhető el (Cloudflare Access mögött); a *.workers.dev cím ki van kapcsolva,
+  // mert az megkerülné a belépést.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "jedbet.xyz", "custom_domain": true }],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/device/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "jedbet-gyartas-db",
+      "database_id": "bddcfaca-f121-47fe-b483-a1c9bd7789c7",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // A dashboardon beállított változók (ACCESS_TEAM_DOMAIN, ACCESS_AUD) és a DEVICE_TOKEN titok
+  // deploynál megmaradnak.
+  "keep_vars": true,
+  "observability": { "enabled": true }
+}

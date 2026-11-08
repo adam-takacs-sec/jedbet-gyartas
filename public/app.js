@@ -446,14 +446,19 @@ async function loadWeather() {
     } else {
       parts.push(`Állomás: ${w.station_error || 'nincs adat'}`);
     }
-    if (w.min_next_72h !== null) parts.push(`3 napos min. ${fmt(w.min_next_72h, 0)} °C`);
     const daysLeft = w.token_expires ? (Date.parse(w.token_expires) - Date.now()) / 86400000 : null;
     if (daysLeft !== null && daysLeft < 10) parts.push(daysLeft < 0 ? '⚠ Nubila-token lejárt' : `⚠ Nubila-token ${Math.ceil(daysLeft)} nap múlva lejár`);
     el.textContent = parts.join(' · ');
     el.title = s?.ts ? `Nubila mérés: ${fmtTime(s.ts)}` : '';
-    const tokenWarn = daysLeft !== null && daysLeft < 10;
-    el.className = 'pill ' + (!s || (w.min_next_72h !== null && w.min_next_72h < 0) ? 'bad'
-      : tokenWarn || (w.min_next_72h !== null && w.min_next_72h < 5) ? 'warn' : '');
+    // Sárga csak akkor, ha az állomással van gond; a hideg időjárás önmagában nem hiba.
+    el.className = 'pill' + (!s || (daysLeft !== null && daysLeft < 10) ? ' warn' : '');
+
+    // Az előrejelzés külön, semleges jelzés.
+    const fc = $('#st-forecast');
+    fc.hidden = w.min_next_72h === null;
+    fc.textContent = w.min_next_72h !== null && w.min_next_72h < 0
+      ? `❄ Fagy várható (3 nap min. ${fmt(w.min_next_72h, 0)} °C)`
+      : `3 napos min. ${fmt(w.min_next_72h, 0)} °C`;
   } catch {}
 }
 

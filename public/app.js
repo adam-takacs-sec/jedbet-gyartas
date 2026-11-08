@@ -310,30 +310,39 @@ function curingChart(canvas, r) {
 function curingChartSimple(canvas, r) {
   const start = Date.parse(r.started_at);
   const gov = r.sensors.find((s) => s.sensor_id === r.governing_sensor) || r.sensors.find((s) => s.role === 'specimen');
-  const series = (gov?.series || []).map((p) => ({ x: (Date.parse(p.ts) - start) / 3600000, y: Math.min(150, (p.te / r.target_te_h) * 100) }));
+  const series = (gov?.series || []).map((p) => ({ x: (Date.parse(p.ts) - start) / 3600000, y: (p.te / r.target_te_h) * 100 }));
   const last = series[series.length - 1];
   const ink = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
-  const ds = [{
-    label: 'Kötés %', data: series, borderColor: '#d62828', backgroundColor: 'rgba(214,40,40,.12)',
-    fill: 'origin', pointRadius: 0, borderWidth: 3, tension: .2,
-  }];
   // A grafikon vége mindig a mostani idő (lezárt kötésnél / raklapnál a vége), így az egész eddigi út kitölti.
   const endMs = r.ended_at ? Date.parse(r.ended_at) : Date.now();
   const maxX = Math.max((endMs - start) / 3600000, last ? last.x : 0, 0.1);
-  ds.push({ label: 'Kiforgatható (100%)', data: [{ x: 0, y: 100 }, { x: maxX, y: 100 }], borderColor: '#2e9e5b',
-    borderWidth: 2, pointRadius: 0, fill: false });
   return new Chart(canvas, {
-    type: 'line', data: { datasets: ds },
+    type: 'line',
+    data: { datasets: [{
+      label: 'Kötés', data: series, borderColor: '#d62828', borderWidth: 3, pointRadius: 0,
+      cubicInterpolationMode: 'monotone', fill: 'origin',
+      backgroundColor: (ctx) => {
+        const { chart } = ctx;
+        if (!chart.chartArea) return 'rgba(214,40,40,.15)';
+        const g = chart.ctx.createLinearGradient(0, chart.chartArea.top, 0, chart.chartArea.bottom);
+        g.addColorStop(0, 'rgba(214,40,40,.35)'); g.addColorStop(1, 'rgba(214,40,40,0)');
+        return g;
+      },
+    }] },
     options: {
       responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
       interaction: { mode: 'nearest', axis: 'x', intersect: false },
       scales: {
-        x: { type: 'linear', min: 0, max: maxX, title: { display: true, text: 'óra az öntés óta', color: ink }, ticks: { color: ink } },
-        y: { min: 0, suggestedMax: 110, title: { display: true, text: 'kötés (%)', color: ink }, ticks: { color: ink, callback: (v) => `${v}%` } },
+        x: { type: 'linear', min: 0, max: maxX, grid: { display: false },
+          title: { display: true, text: 'óra az öntés óta', color: ink },
+          ticks: { color: ink, callback: (v) => (Number.isInteger(v) ? v : '') } },
+        y: { min: 0, grace: '8%', border: { display: false }, ticks: { color: ink, callback: (v) => `${v}%` } },
       },
       plugins: {
-        legend: { labels: { color: ink, boxWidth: 12 } },
-        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${Math.round(c.parsed.y)}% · ${fmt(c.parsed.x, 0)}. óra` } },
+        legend: { display: false },
+        tooltip: { displayColors: false, callbacks: {
+          title: (items) => `${fmt(items[0].parsed.x, 1)} óra az öntés óta`,
+          label: (c) => `Kötés: ${Math.round(c.parsed.y)}%` } },
       },
     },
   });

@@ -178,3 +178,5 @@ form.demold { margin-top: 12px; }
 .seg { display: inline-flex; margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { min-height: 34px; padding: 0 14px; border: 0; background: var(--input); color: var(--muted); font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--red); color: #fff; }
+.kv.big { font-size: 1.05rem; gap: 6px 24px; }
+.kv.big b { font-size: 1.35rem; }

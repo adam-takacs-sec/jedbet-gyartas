@@ -226,6 +226,15 @@ async function loadCuring() {
 
 const todayLocalInput = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 
+function simpleKv(r, gov) {
+  const hours = (Date.parse(r.ended_at || new Date().toISOString()) - Date.parse(r.started_at)) / 3600000;
+  return `<div class="kv big">
+      <span>Kötés: <b>${Math.min(100, Math.round(r.progress * 100))}%</b></span>
+      <span>Öntés óta: <b>${fmt(hours, 0)} óra</b></span>
+      <span>Beton most: <b>${gov ? fmt(gov.last_temp, 1) + ' °C' : '–'}</b></span>
+    </div>`;
+}
+
 function runHtml(r) {
   const badge = r.ended_at ? '<span class="badge ended">Lezárva</span>'
     : r.ready ? '<span class="badge ready">Kiforgatható</span>'
@@ -242,15 +251,16 @@ function runHtml(r) {
       <div class="muted small">Öntés vége: ${fmtTime(r.started_at)}${r.ended_at ? ` · lezárva: ${fmtTime(r.ended_at)}` : ''}</div></div>
       <div>${badge} ${frost}</div></div>
     <div class="bar ${r.ready ? 'done' : ''}"><i style="width:${Math.round(r.progress * 100)}%"></i></div>
-    <div class="kv">
+    ${chartMode === 'simple' ? simpleKv(r, gov) : `<div class="kv">
       <span>Egyenértékű kor: <b>${fmt(r.eq_age_h, 1)} / ${fmt(r.target_te_h, 0)} óra</b></span>
       <span>Hátra: <b>${left}</b></span>
       <span>Döntő szenzor: <b>${gov ? esc(gov.label) : '–'}</b></span>
       ${r.sensors.map((s) => s.role === 'air'
         ? `<span>${esc(s.label)} (levegő): <b>${fmt(s.last_temp, 1)} °C</b> · min. ${fmt(s.min_temp, 1)} °C</span>`
         : `<span>${esc(s.label)}: <b>${fmt(s.last_temp, 1)} °C</b> · ${fmt(s.eq_age_h, 1)} ó · NS ${fmt(s.nurse_saul, 0)} °C·h</span>`).join('')}
-    </div>
-    ${gaps.length ? `<p class="small neg">Adatkiesés: ${gaps.map((g) => `${esc(g.label)} ${fmtTime(g.from)} – ${fmtTime(g.to)} (${g.minutes} perc)`).join('; ')}. Ezalatt az érettség nem nőtt, vagyis az érték óvatos.</p>` : ''}
+    </div>`}
+    ${gaps.length && chartMode === 'simple' ? '<p class="small neg">Volt adatkiesés; a részletes nézetben látszik, mikor.</p>' : ''}
+    ${gaps.length && chartMode === 'detail' ? `<p class="small neg">Adatkiesés: ${gaps.map((g) => `${esc(g.label)} ${fmtTime(g.from)} – ${fmtTime(g.to)} (${g.minutes} perc)`).join('; ')}. Ezalatt az érettség nem nőtt, vagyis az érték óvatos.</p>` : ''}
     ${modeToggle()}
     <div class="chart-box"><canvas id="chart-${r.id}"></canvas></div>
 
@@ -289,7 +299,7 @@ document.addEventListener('click', (e) => {
   chartMode = b.dataset.chartMode;
   try { localStorage.setItem('chartMode', chartMode); } catch {}
   $$('[data-chart-mode]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.chartMode === chartMode)));
-  for (const id of Object.keys(state.charts)) openRunChart(+id);
+  if (!$('#tab-erleles').hidden) loadCuring();
   if (state.dialogRun && $('#pd-chart')) { state.dialogChart?.destroy(); state.dialogChart = curingChart($('#pd-chart'), state.dialogRun); }
 });
 
@@ -307,12 +317,7 @@ function curingChartSimple(canvas, r) {
     label: 'Kötés %', data: series, borderColor: '#d62828', backgroundColor: 'rgba(214,40,40,.12)',
     fill: 'origin', pointRadius: 0, borderWidth: 3, tension: .2,
   }];
-  // Előrejelzés: ha a mostani hőmérséklet marad, mikor éri el a 100%-ot.
-  if (last && !r.ended_at && r.hours_left && last.y < 100) {
-    ds.push({ label: 'Előrejelzés', data: [last, { x: last.x + r.hours_left, y: 100 }], borderColor: '#d62828',
-      borderDash: [6, 5], borderWidth: 2, pointRadius: [0, 4], pointBackgroundColor: '#d62828', fill: false });
-  }
-  const rawMax = Math.max(last ? last.x : 0, ds[1] ? ds[1].data[1].x : 0) * 1.05 || 6;
+  const rawMax = (last ? last.x : 0) * 1.05 || 6;
   const maxX = Math.ceil(rawMax / 6) * 6; // kerek tengelyvég (6 órás lépés)
   ds.push({ label: 'Kiforgatható (100%)', data: [{ x: 0, y: 100 }, { x: maxX, y: 100 }], borderColor: '#2e9e5b',
     borderWidth: 2, pointRadius: 0, fill: false });

@@ -33,7 +33,45 @@ export default {
       return json({ error: 'Szerverhiba' }, 500);
     }
   },
+
+  // 10 percenként: a Nubila-állomás hőmérsékletét eltároljuk, mint egy „levegő” szenzort.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(logStation(env));
+  },
 };
+
+const STATION_SENSOR = 'nubila-allomas';
+
+async function fetchNubila(env) {
+  const key = env.NUBILA_API_KEY;
+  if (!key) return null;
+  const url = `https://api.nubila.ai/api/v1/weather?lat=${SITE.lat}&lon=${SITE.lon}`;
+  let res = await fetch(url, { headers: { 'X-Api-Key': key } }).catch(() => null);
+  // A régi rendszer Bearer-tokennel hívta; ha a kulcs ilyen, azzal is próbálkozunk.
+  if (res && res.status === 401) res = await fetch(url, { headers: { Authorization: `Bearer ${key}` } }).catch(() => null);
+  if (!res || !res.ok) return { error: res ? `Nubila hiba (${res.status})` : 'Nubila nem elérhető' };
+  const body = await res.json().catch(() => null);
+  const d = body?.data && typeof body.data === 'object' ? body.data : body;
+  if (!d || !Number.isFinite(d.temperature)) return { error: 'Nubila: nincs mérés a válaszban' };
+  return {
+    temp: d.temperature, humidity: d.humidity ?? null, wind_speed: d.wind_speed ?? null,
+    wind_direction: d.wind_direction ?? null, pressure: d.pressure ?? null, rain: d.rain ?? null,
+    online: d.is_online ?? null, malfunction: d.is_malfunction ?? null,
+    location: d.location_name || d.address || '', ts: d.timestamp ? new Date(d.timestamp * (d.timestamp < 1e12 ? 1000 : 1)).toISOString() : null,
+  };
+}
+
+async function logStation(env) {
+  const w = await fetchNubila(env);
+  if (!w || w.error) { if (w) console.warn(w.error); return; }
+  const ts = new Date();
+  ts.setUTCSeconds(0, 0);
+  await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO sensors (id, label, role) VALUES (?, 'Nubila állomás', 'air')`).bind(STATION_SENSOR),
+    env.DB.prepare('INSERT OR IGNORE INTO readings (sensor_id, ts, temp) VALUES (?,?,?)')
+      .bind(STATION_SENSOR, ts.toISOString(), Math.round(w.temp * 100) / 100),
+  ]);
+}
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -360,20 +398,20 @@ async function routeApi(request, env, url, user) {
     return json(results);
   }
 
+  // Mért adat a saját Nubila-állomásról; előrejelzés (fagyjelzés) az Open-Meteóból.
   if (p === '/api/weather' && m === 'GET') {
-    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${SITE.lat}&longitude=${SITE.lon}` +
-      `&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m&forecast_days=3&timezone=${encodeURIComponent(TZ)}`,
-      { cf: { cacheTtl: 600, cacheEverything: true } }).catch(() => null);
-    if (!res || !res.ok) throw new HttpError(502, 'Időjárás nem elérhető');
-    const w = await res.json();
-    const hourly = w.hourly || { time: [], temperature_2m: [] };
-    const next48 = hourly.temperature_2m.slice(0, 72);
+    const [station, fc] = await Promise.all([
+      fetchNubila(env),
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${SITE.lat}&longitude=${SITE.lon}` +
+        `&hourly=temperature_2m&forecast_days=3&timezone=${encodeURIComponent(TZ)}`,
+        { cf: { cacheTtl: 600, cacheEverything: true } }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+    const temps = fc?.hourly?.temperature_2m?.slice(0, 72) || [];
+    if ((!station || station.error) && !temps.length) throw new HttpError(502, station?.error || 'Időjárás nem elérhető');
     return json({
-      temp: w.current?.temperature_2m ?? null,
-      humidity: w.current?.relative_humidity_2m ?? null,
-      code: w.current?.weather_code ?? null,
-      min_next_72h: next48.length ? Math.min(...next48) : null,
-      hourly: { time: hourly.time.slice(0, 72), temp: next48 },
+      station: station && !station.error ? station : null,
+      station_error: station?.error || (station ? null : 'Nincs Nubila-kulcs beállítva'),
+      min_next_72h: temps.length ? Math.min(...temps) : null,
     });
   }
 

@@ -436,8 +436,20 @@ async function loadWeather() {
   try {
     const w = await api('/api/weather', { quiet: true });
     const el = $('#st-weather');
-    el.textContent = `Kint: ${fmt(w.temp, 1)} °C · 3 napos min. ${fmt(w.min_next_72h, 0)} °C`;
-    el.className = 'pill ' + (w.min_next_72h !== null && w.min_next_72h < 0 ? 'bad' : w.min_next_72h < 5 ? 'warn' : '');
+    const s = w.station;
+    const parts = [];
+    if (s) {
+      parts.push(`Állomás: ${fmt(s.temp, 1)} °C`);
+      if (s.humidity !== null) parts.push(`${fmt(s.humidity, 0)}%`);
+      if (s.wind_speed !== null) parts.push(`szél ${fmt(s.wind_speed, 1)} m/s`);
+      if (s.online === false || s.malfunction === true) parts.push('⚠ állomás hiba');
+    } else {
+      parts.push('Állomás: nincs adat');
+    }
+    if (w.min_next_72h !== null) parts.push(`3 napos min. ${fmt(w.min_next_72h, 0)} °C`);
+    el.textContent = parts.join(' · ');
+    el.title = s ? `${s.location || 'Nubila'}${s.ts ? ' · ' + fmtTime(s.ts) : ''}` : (w.station_error || '');
+    el.className = 'pill ' + (w.min_next_72h !== null && w.min_next_72h < 0 ? 'bad' : w.min_next_72h !== null && w.min_next_72h < 5 ? 'warn' : '');
   } catch {}
 }
 

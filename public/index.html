@@ -20,15 +20,21 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="gyartas" aria-selected="true">Gyártás</button>
-    <button role="tab" data-tab="erleles">Érlelés</button>
+    <!-- A Gyártás fül egyelőre rejtve; a kódja megvan. -->
+    <button role="tab" data-tab="gyartas" hidden>Gyártás</button>
+    <button role="tab" data-tab="erleles" aria-selected="true">Kötés</button>
     <button role="tab" data-tab="raktar">Raktár</button>
     <button role="tab" data-tab="munkak">Munkák</button>
   </nav>
 
+  <form class="search" id="search-form" role="search">
+    <input id="search-input" name="q" placeholder="Raklap sorszáma, pl. JB-261110-01" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Raklap sorszáma">
+    <button class="btn" type="submit">Keresés</button>
+  </form>
+
   <main>
     <!-- GYÁRTÁS -->
-    <section id="tab-gyartas" class="tab">
+    <section id="tab-gyartas" class="tab" hidden>
       <div class="grid2">
         <form class="card" id="mix-form">
           <h2>1. Keverés</h2>
@@ -58,7 +64,6 @@
             <button class="btn success big" type="submit" disabled id="pour-submit">Darab mentése</button>
           </form>
           <div id="pours-of-mix" class="list"></div>
-          <canvas id="label-canvas" width="384" height="240" class="label-preview" hidden></canvas>
         </div>
       </div>
 
@@ -68,8 +73,8 @@
       </div>
     </section>
 
-    <!-- ÉRLELÉS -->
-    <section id="tab-erleles" class="tab" hidden>
+    <!-- KÖTÉS -->
+    <section id="tab-erleles" class="tab">
       <div class="card">
         <h2>Szenzorok most</h2>
         <div id="sensor-cards" class="sensor-grid"></div>
@@ -81,13 +86,14 @@
       </div>
 
       <div class="card">
-        <div class="card-head"><h2>Érlelések</h2><button class="btn primary" id="new-run-btn">Új érlelés indítása</button></div>
+        <div class="card-head"><h2>Kötések</h2><button class="btn primary" id="new-run-btn">Új kötés indítása</button></div>
+        <p class="muted small">Öntés végén indítsd el a kötést. Kiforgatáskor a kötésnél rögzítsd a raklapokat: mindegyik kap egy sorszámos címkét.</p>
         <form id="run-form" class="sub" hidden>
-          <label>Név<input name="name" required maxlength="120" placeholder="pl. Hétfői öntés, A csoport"></label>
+          <label>Név<input name="name" required maxlength="120" placeholder="pl. Hétfő, A csoport"></label>
           <label>Keverés (opcionális)<select name="mix_id" id="run-mix"><option value="">—</option></select></label>
           <fieldset><legend>Szenzorok</legend><div id="run-sensors" class="checks"></div></fieldset>
           <label>Kiforgatási küszöb (egyenértékű kor, óra 20 °C-on)<input name="target_te_h" type="number" value="48" min="1" step="any"></label>
-          <label>Kezdés<input name="started_at" type="datetime-local"></label>
+          <label>Öntés vége (a kötés kezdete)<input name="started_at" type="datetime-local"></label>
           <div class="row-btns"><button class="btn primary" type="submit">Indítás</button><button class="btn" type="button" id="run-cancel">Mégse</button></div>
         </form>
         <div id="runs"></div>
@@ -110,14 +116,14 @@
           </form>
         </div>
         <div class="card">
-          <h2>Késztermék</h2>
+          <h2>Készáru (raklapokon)</h2>
           <div id="products"></div>
         </div>
       </div>
       <div class="card">
-        <h2>Darabok</h2>
-        <div class="filters"><select id="pour-filter"></select></div>
-        <div class="table-wrap"><table id="pour-table"><thead><tr><th>Sorszám</th><th>Sablon</th><th>Öntve</th><th>Státusz</th><th></th></tr></thead><tbody></tbody></table></div>
+        <h2>Raklapok</h2>
+        <div class="filters"><select id="pallet-filter"></select></div>
+        <div class="table-wrap"><table id="pallet-table"><thead><tr><th>Sorszám</th><th>Minta</th><th class="num">Db</th><th>Öntve</th><th>Kiforgatva</th><th>Státusz</th></tr></thead><tbody></tbody></table></div>
       </div>
     </section>
 
@@ -159,6 +165,12 @@
     </section>
   </main>
 
+  <dialog id="pallet-dialog" class="dialog" aria-labelledby="pd-title">
+    <div class="card-head"><h2 id="pd-title"></h2><button class="btn sm" id="pd-close" type="button" aria-label="Bezárás">Bezárás</button></div>
+    <div id="pd-body"></div>
+  </dialog>
+
+  <canvas id="label-canvas" width="384" height="240" hidden></canvas>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="/vendor/qrcode.js"></script>

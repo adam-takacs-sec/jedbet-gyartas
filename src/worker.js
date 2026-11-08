@@ -6,6 +6,7 @@ import { computeMaturity, hoursToTarget } from './maturity.js';
 export const TEMPLATES = ['Végoszlop', 'Középoszlop', 'Mediterrán', 'Homokkő', 'Hullám'];
 const PANEL_TEMPLATES = TEMPLATES.filter((t) => !t.endsWith('oszlop'));
 const POUR_STATUSES = ['Kötés alatt', 'Raktározott', 'Lefoglalt', 'Beépítve', 'Selejt'];
+const PALLET_STATUSES = ['Raktáron', 'Lefoglalt', 'Kiszállítva', 'Selejt'];
 const MATERIALS = { cement: 'Cement', viz: 'Víz', kavics: 'Kavics', folyosito: 'Folyósító', kalcidur: 'Kalcidur' };
 const TZ = 'Europe/Budapest';
 const SITE = { lat: 47.65, lon: 17.92 }; // Bana
@@ -236,7 +237,7 @@ async function routeApi(request, env, url, user) {
 
   if (p === '/api/me' && m === 'GET') return json(user);
   if (p === '/api/config' && m === 'GET') {
-    return json({ templates: TEMPLATES, panelTemplates: PANEL_TEMPLATES, statuses: POUR_STATUSES });
+    return json({ templates: TEMPLATES, panelTemplates: PANEL_TEMPLATES, statuses: POUR_STATUSES, palletStatuses: PALLET_STATUSES });
   }
 
   // --- Keverés ---
@@ -325,11 +326,84 @@ async function routeApi(request, env, url, user) {
     return json({ print_job_id: row.id });
   }
 
+  // --- Raklapok ---
+  if (p === '/api/pallets' && m === 'GET') {
+    const status = url.searchParams.get('status');
+    const { results } = await db.prepare(
+      `SELECT pl.*, r.name AS run_name FROM pallets pl LEFT JOIN curing_runs r ON r.id = pl.run_id
+       ${status ? 'WHERE pl.status = ?' : ''} ORDER BY pl.id DESC LIMIT 500`).bind(...(status ? [status] : [])).all();
+    return json(results);
+  }
+  if (p === '/api/pallets/lookup' && m === 'GET') {
+    const q = str(url.searchParams.get('q'), 'sorszám', { required: true, max: 40 }).toUpperCase();
+    const pallet = await db.prepare('SELECT * FROM pallets WHERE upper(serial) = ?').bind(q).first();
+    if (!pallet) notFound();
+    let run = null;
+    if (pallet.run_id) {
+      const r0 = await db.prepare('SELECT * FROM curing_runs WHERE id = ?').bind(pallet.run_id).first();
+      if (r0) run = await runStatus(db, { ...r0, ended_at: r0.ended_at && r0.ended_at < pallet.demolded_at ? r0.ended_at : pallet.demolded_at }, true);
+    }
+    const { results: prints } = await db.prepare(
+      'SELECT id, status, error, created_at FROM print_jobs WHERE pallet_id = ? ORDER BY id').bind(pallet.id).all();
+    return json({ pallet, run, prints });
+  }
+  if ((r = p.match(/^\/api\/curing\/(\d+)\/pallets$/)) && m === 'POST') {
+    const b = await body(request);
+    const run = await db.prepare('SELECT * FROM curing_runs WHERE id = ?').bind(+r[1]).first();
+    if (!run) notFound();
+    const template = str(b.template, 'minta', { required: true, max: 60 });
+    if (!TEMPLATES.includes(template)) bad('Ismeretlen minta');
+    const count = num(b.panel_count, 'darabszám', { min: 1, max: 200 });
+    if (!Number.isInteger(count)) bad('A darabszám egész szám legyen');
+    const demolded = b.demolded_at ? new Date(b.demolded_at) : new Date();
+    if (Number.isNaN(demolded.getTime()) || demolded.toISOString() < run.started_at) bad('Érvénytelen kiforgatási idő');
+    // Pillanatkép a kiforgatáskori érettségről, hogy a raklap adata később se változzon.
+    const st = await runStatus(db, { ...run, ended_at: demolded.toISOString() }, false);
+    const gov = st.sensors.find((x) => x.sensor_id === st.governing_sensor);
+    const specimens = st.sensors.filter((x) => x.role === 'specimen' && x.min_temp !== null);
+    const minTemp = specimens.length ? Math.min(...specimens.map((x) => x.min_temp)) : null;
+    const day = localDate(demolded).slice(2).replace(/-/g, '');
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { n } = await db.prepare('SELECT COUNT(*) AS n FROM pallets WHERE serial LIKE ?').bind(`JB-${day}-%`).first();
+      const serial = `JB-${day}-${String(n + 1 + attempt).padStart(2, '0')}`;
+      try {
+        const row = await db.prepare(
+          `INSERT INTO pallets (serial, run_id, template, panel_count, poured_at, demolded_at, note,
+             te_at_demold, ns_at_demold, min_temp, governing_sensor, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING *`)
+          .bind(serial, run.id, template, count, run.started_at, demolded.toISOString(), str(b.note, 'megjegyzés'),
+            gov ? gov.eq_age_h : null, gov ? gov.nurse_saul : null, minTemp, gov ? gov.label : null, user.email).first();
+        return json({ ...row, label: { poured: localDateTime(new Date(run.started_at)), demolded: localDateTime(demolded) } });
+      } catch (e) {
+        if (!String(e).includes('UNIQUE')) throw e;
+      }
+    }
+    throw new HttpError(409, 'Nem sikerült sorszámot adni, próbáld újra');
+  }
+  if ((r = p.match(/^\/api\/pallets\/(\d+)$/)) && m === 'PATCH') {
+    const b = await body(request);
+    const cur = await db.prepare('SELECT * FROM pallets WHERE id = ?').bind(+r[1]).first();
+    if (!cur) notFound();
+    const status = b.status === undefined ? cur.status : str(b.status, 'státusz');
+    if (!PALLET_STATUSES.includes(status)) bad('Ismeretlen státusz');
+    const note = b.note === undefined ? cur.note : str(b.note, 'megjegyzés');
+    await db.prepare('UPDATE pallets SET status = ?, note = ? WHERE id = ?').bind(status, note, cur.id).run();
+    return json({ ok: true });
+  }
+  if ((r = p.match(/^\/api\/pallets\/(\d+)\/print$/)) && m === 'POST') {
+    const b = await body(request);
+    const png = decodePng(b.png_base64);
+    const pl = await db.prepare('SELECT id FROM pallets WHERE id = ?').bind(+r[1]).first();
+    if (!pl) notFound();
+    const row = await db.prepare('INSERT INTO print_jobs (pallet_id, png) VALUES (?, ?) RETURNING id').bind(pl.id, png).first();
+    return json({ print_job_id: row.id });
+  }
+
   // --- Készlet ---
   if (p === '/api/inventory' && m === 'GET') {
     const [{ results: stock }, { results: products }] = await db.batch([
       db.prepare('SELECT material, quantity, unit FROM stock ORDER BY rowid'),
-      db.prepare(`SELECT status, template, COUNT(*) AS count FROM pours
+      db.prepare(`SELECT status, template, SUM(panel_count) AS count, COUNT(*) AS pallets FROM pallets
                   GROUP BY status, template ORDER BY template, status`),
     ]);
     return json({ stock, products });
@@ -446,8 +520,9 @@ async function routeApi(request, env, url, user) {
   }
   if (p === '/api/print-jobs' && m === 'GET') {
     const { results } = await db.prepare(
-      `SELECT pj.id, pj.status, pj.error, pj.attempts, pj.created_at, pj.updated_at, p.serial
-       FROM print_jobs pj LEFT JOIN pours p ON p.id = pj.pour_id ORDER BY pj.id DESC LIMIT 20`).all();
+      `SELECT pj.id, pj.status, pj.error, pj.attempts, pj.created_at, pj.updated_at, COALESCE(pl.serial, p.serial) AS serial
+       FROM print_jobs pj LEFT JOIN pours p ON p.id = pj.pour_id LEFT JOIN pallets pl ON pl.id = pj.pallet_id
+       ORDER BY pj.id DESC LIMIT 20`).all();
     return json(results);
   }
 
@@ -495,7 +570,7 @@ async function jobSummary(db, jobId) {
     return { ...s, spans, veg, kozep, panels };
   });
   const { results: stock } = await db.prepare(
-    `SELECT template, COUNT(*) AS n FROM pours WHERE status = 'Raktározott' GROUP BY template`).all();
+    `SELECT template, SUM(panel_count) AS n FROM pallets WHERE status = 'Raktáron' GROUP BY template`).all();
   const have = Object.fromEntries(stock.map((x) => [x.template, x.n]));
   const summary = Object.entries(need).filter(([, n]) => n > 0).map(([item, needed]) => ({
     item, needed, in_stock: have[item] || 0, missing: Math.max(0, needed - (have[item] || 0)),

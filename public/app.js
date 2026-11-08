@@ -377,14 +377,15 @@ function drawPalletLabel(p) {
   const W = c.width, H = c.height;
   g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
   g.fillStyle = '#000'; g.strokeStyle = '#000';
-  g.lineWidth = 3; g.strokeRect(5.5, 5.5, W - 11, H - 11);
+  // A keret és a fejléc a címke széléig ér (a kalibráció szerint a 0. pont a címke bal széle).
+  g.lineWidth = 4; g.strokeRect(2, 2, W - 4, H - 4);
   const font = (px, w = 'bold') => `${w} ${px}px "DejaVu Sans", Verdana, Arial, sans-serif`;
 
   // Fejléc sáv
-  g.fillRect(5, 5, W - 10, 40);
+  g.fillRect(0, 0, W, 44);
   g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.textAlign = 'left';
-  g.font = font(24); g.fillText('JEDBET', 16, 26);
-  g.textAlign = 'right'; g.font = font(18); g.fillText(`${p.panel_count} db`, W - 16, 26);
+  g.font = font(24); g.fillText('JEDBET', 14, 23);
+  g.textAlign = 'right'; g.font = font(18); g.fillText(`${p.panel_count} db`, W - 14, 23);
   g.fillStyle = '#000';
 
   // QR: a sorszám keresését nyitja meg a gyártási oldalon

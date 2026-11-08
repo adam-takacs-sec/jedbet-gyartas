@@ -566,7 +566,8 @@ async function loadStatus() {
       pi.className = 'pill ' + (noSensors ? 'warn' : min < 12 ? 'ok' : 'bad');
     }
     const pending = jobs.filter((j) => j.status === 'pending' || j.status === 'printing').length;
-    const failed = jobs.filter((j) => j.status === 'error').slice(0, 1)[0];
+    // Csak a legutóbbi munka számít: egy régi hiba után sikeres nyomtatás már rendben van.
+    const failed = jobs[0] && jobs[0].status === 'error' ? jobs[0] : null;
     const ps = $('#st-print');
     ps.hidden = !pending && !failed;
     ps.textContent = pending ? `Nyomtatásra vár: ${pending}` : failed ? `Nyomtatási hiba: ${failed.serial || ''}` : '';

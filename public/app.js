@@ -251,6 +251,7 @@ function runHtml(r) {
         : `<span>${esc(s.label)}: <b>${fmt(s.last_temp, 1)} °C</b> · ${fmt(s.eq_age_h, 1)} ó · NS ${fmt(s.nurse_saul, 0)} °C·h</span>`).join('')}
     </div>
     ${gaps.length ? `<p class="small neg">Adatkiesés: ${gaps.map((g) => `${esc(g.label)} ${fmtTime(g.from)} – ${fmtTime(g.to)} (${g.minutes} perc)`).join('; ')}. Ezalatt az érettség nem nőtt, vagyis az érték óvatos.</p>` : ''}
+    ${modeToggle()}
     <div class="chart-box"><canvas id="chart-${r.id}"></canvas></div>
 
     <h3>Raklapok ${pals.length ? `· ${pals.length} db, ${total} elem` : ''}</h3>
@@ -276,7 +277,63 @@ function runHtml(r) {
     </div></div>`;
 }
 
+// Nézet: 'simple' (kötés %) vagy 'detail' (hőmérsékletek + egyenértékű kor). Megjegyezzük.
+let chartMode = 'simple';
+try { chartMode = localStorage.getItem('chartMode') || 'simple'; } catch {}
+const modeToggle = () => `<div class="seg" role="group" aria-label="Grafikon nézet">
+  <button type="button" data-chart-mode="simple" aria-pressed="${chartMode === 'simple'}">Egyszerű</button>
+  <button type="button" data-chart-mode="detail" aria-pressed="${chartMode === 'detail'}">Részletes</button></div>`;
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-chart-mode]');
+  if (!b || b.dataset.chartMode === chartMode) return;
+  chartMode = b.dataset.chartMode;
+  try { localStorage.setItem('chartMode', chartMode); } catch {}
+  $$('[data-chart-mode]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.chartMode === chartMode)));
+  for (const id of Object.keys(state.charts)) openRunChart(+id);
+  if (state.dialogRun && $('#pd-chart')) { state.dialogChart?.destroy(); state.dialogChart = curingChart($('#pd-chart'), state.dialogRun); }
+});
+
 function curingChart(canvas, r) {
+  return chartMode === 'detail' ? curingChartDetail(canvas, r) : curingChartSimple(canvas, r);
+}
+
+function curingChartSimple(canvas, r) {
+  const start = Date.parse(r.started_at);
+  const gov = r.sensors.find((s) => s.sensor_id === r.governing_sensor) || r.sensors.find((s) => s.role === 'specimen');
+  const series = (gov?.series || []).map((p) => ({ x: (Date.parse(p.ts) - start) / 3600000, y: Math.min(150, (p.te / r.target_te_h) * 100) }));
+  const last = series[series.length - 1];
+  const ink = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+  const ds = [{
+    label: 'Kötés %', data: series, borderColor: '#d62828', backgroundColor: 'rgba(214,40,40,.12)',
+    fill: 'origin', pointRadius: 0, borderWidth: 3, tension: .2,
+  }];
+  // Előrejelzés: ha a mostani hőmérséklet marad, mikor éri el a 100%-ot.
+  if (last && !r.ended_at && r.hours_left && last.y < 100) {
+    ds.push({ label: 'Előrejelzés', data: [last, { x: last.x + r.hours_left, y: 100 }], borderColor: '#d62828',
+      borderDash: [6, 5], borderWidth: 2, pointRadius: [0, 4], pointBackgroundColor: '#d62828', fill: false });
+  }
+  const rawMax = Math.max(last ? last.x : 0, ds[1] ? ds[1].data[1].x : 0) * 1.05 || 6;
+  const maxX = Math.ceil(rawMax / 6) * 6; // kerek tengelyvég (6 órás lépés)
+  ds.push({ label: 'Kiforgatható (100%)', data: [{ x: 0, y: 100 }, { x: maxX, y: 100 }], borderColor: '#2e9e5b',
+    borderWidth: 2, pointRadius: 0, fill: false });
+  return new Chart(canvas, {
+    type: 'line', data: { datasets: ds },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+      interaction: { mode: 'nearest', axis: 'x', intersect: false },
+      scales: {
+        x: { type: 'linear', min: 0, max: maxX, title: { display: true, text: 'óra az öntés óta', color: ink }, ticks: { color: ink } },
+        y: { min: 0, suggestedMax: 110, title: { display: true, text: 'kötés (%)', color: ink }, ticks: { color: ink, callback: (v) => `${v}%` } },
+      },
+      plugins: {
+        legend: { labels: { color: ink, boxWidth: 12 } },
+        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${Math.round(c.parsed.y)}% · ${fmt(c.parsed.x, 0)}. óra` } },
+      },
+    },
+  });
+}
+
+function curingChartDetail(canvas, r) {
   const start = Date.parse(r.started_at);
   const colors = ['#d62828', '#3d8fd1', '#2e9e5b', '#d99a1e', '#9b59b6', '#8f9296'];
   const ds = [];
@@ -433,7 +490,7 @@ async function openPallet(serial) {
       <span>Rögzítette: <b>${esc(p.created_by || '–')}</b></span>
     </div>
     <label>Megjegyzés<input id="pd-note" value="${esc(p.note)}" maxlength="500"></label>
-    ${r ? '<div class="chart-box"><canvas id="pd-chart"></canvas></div><p class="muted small">A grafikon az öntéstől a kiforgatásig tart.</p>' : ''}
+    ${r ? `${modeToggle()}<div class="chart-box"><canvas id="pd-chart"></canvas></div><p class="muted small">A grafikon az öntéstől a kiforgatásig tart.</p>` : ''}
     <div class="row-btns">
       <button class="btn primary" id="pd-save" type="button">Mentés</button>
       <button class="btn" id="pd-print" type="button">Címke újranyomtatása</button>
@@ -442,6 +499,7 @@ async function openPallet(serial) {
   const dlg = $('#pallet-dialog');
   if (!dlg.open) dlg.showModal();
   history.replaceState(null, '', `?s=${encodeURIComponent(p.serial)}`);
+  state.dialogRun = r;
   if (r && typeof Chart !== 'undefined') { state.dialogChart?.destroy(); state.dialogChart = curingChart($('#pd-chart'), r); }
   $('#pd-save').onclick = async () => {
     await api(`/api/pallets/${p.id}`, { method: 'PATCH', body: { status: $('#pd-status').value, note: $('#pd-note').value } });

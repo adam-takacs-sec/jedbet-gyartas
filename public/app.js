@@ -494,21 +494,48 @@ function qrMatrix(text) {
   return rows;
 }
 
-async function printPalletLabel(p) {
+async function queuePalletLabel(p) {
   const { print_job_id: id } = await api(`/api/pallets/${p.id}/print`, { method: 'POST', body: { qr: qrMatrix(`${location.origin}/?s=${encodeURIComponent(p.serial)}`) } });
-  toast(`${p.serial} – címke elküldve a Pi-nek…`);
-  // Figyeljük a munkát, amíg a Pi vissza nem jelez (legfeljebb ~1,5 percig).
-  for (let i = 0; i < 30; i++) {
-    await new Promise((res) => setTimeout(res, 3000));
-    const j = await api(`/api/print-jobs/${id}`, { quiet: true }).catch(() => null);
-    if (!j) continue;
-    if (j.status === 'done') { toast(`${p.serial} – kinyomtatva`); loadStatus(); return; }
-    if (j.status === 'error') {
-      const last = (j.error || '').trim().split('\n').pop();
-      toast(`${p.serial} – nyomtatási hiba: ${last || 'ismeretlen'}`, true); loadStatus(); return;
+  return id;
+}
+// Figyeli a nyomtatási munkákat, amíg mind kész vagy hibás nem lesz (legfeljebb ~1,5 perc + 20 mp/címke).
+async function watchPrintJobs(ids) {
+  const res = new Map();
+  const rounds = 30 + ids.length * 7;
+  for (let i = 0; i < rounds && res.size < ids.length; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    for (const id of ids) {
+      if (res.has(id)) continue;
+      const j = await api(`/api/print-jobs/${id}`, { quiet: true }).catch(() => null);
+      if (j && (j.status === 'done' || j.status === 'error')) res.set(id, j);
     }
   }
-  toast(`${p.serial} – a Pi nem jelzett vissza. Be van kapcsolva a Pi és a nyomtató?`, true);
+  return res;
+}
+async function printPalletLabel(p) {
+  const id = await queuePalletLabel(p);
+  toast(`${p.serial} – címke elküldve a Pi-nek…`);
+  const j = (await watchPrintJobs([id])).get(id);
+  if (!j) toast(`${p.serial} – a Pi nem jelzett vissza. Be van kapcsolva a Pi és a nyomtató?`, true);
+  else if (j.status === 'done') toast(`${p.serial} – kinyomtatva`);
+  else toast(`${p.serial} – nyomtatási hiba: ${(j.error || '').trim().split('\n').pop() || 'ismeretlen'}`, true);
+  loadStatus();
+}
+async function printPalletLabels(list) {
+  if (!list.length) return;
+  if (list.length === 1) return printPalletLabel(list[0]);
+  const jobs = [];
+  for (const p of list) {
+    try { jobs.push({ p, id: await queuePalletLabel(p) }); } catch { /* a hibát az api() már kiírta */ }
+  }
+  if (!jobs.length) return;
+  toast(`${jobs.length} címke elküldve a Pi-nek, sorban nyomtatja…`);
+  const res = await watchPrintJobs(jobs.map((x) => x.id));
+  const ok = jobs.filter((x) => res.get(x.id)?.status === 'done');
+  const failed = jobs.filter((x) => res.get(x.id)?.status === 'error').map((x) => x.p.serial);
+  const missing = jobs.filter((x) => !res.has(x.id)).map((x) => x.p.serial);
+  if (!failed.length && !missing.length) toast(`${ok.length} címke kinyomtatva`);
+  else toast(`${ok.length}/${jobs.length} kész.${failed.length ? ' Hiba: ' + failed.join(', ') + '.' : ''}${missing.length ? ' Nem jelzett vissza: ' + missing.join(', ') + '.' : ''}`, true);
   loadStatus();
 }
 
@@ -590,14 +617,49 @@ async function loadInventory() {
 async function loadPalletTable() {
   const st = $('#pallet-filter').value;
   const pallets = await api('/api/pallets' + (st ? `?status=${encodeURIComponent(st)}` : ''));
-  $('#pallet-table tbody').innerHTML = pallets.map((p) => `<tr>
+  state.pallets = pallets;
+  const visible = new Set(pallets.map((p) => p.id));
+  for (const id of state.palletSel) if (!visible.has(id)) state.palletSel.delete(id);
+  $('#pallet-table tbody').innerHTML = pallets.map((p) => `<tr class="${state.palletSel.has(p.id) ? 'checked' : ''}">
+    <td class="sel"><input type="checkbox" data-pallet-sel="${p.id}" ${state.palletSel.has(p.id) ? 'checked' : ''} aria-label="${esc(p.serial)} kijelölése"></td>
     <td><button class="link" data-open-serial="${esc(p.serial)}">${esc(p.serial)}</button></td><td>${esc(p.template)}</td>
     <td class="num">${p.panel_count}</td><td>${fmtTime(p.poured_at)}</td><td>${fmtTime(p.demolded_at)}</td>
     <td><select data-pallet-status="${p.id}">${state.config.palletStatuses.map((s) => `<option ${s === p.status ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></td></tr>`).join('')
-    || '<tr><td colspan="6" class="muted">Nincs találat.</td></tr>';
+    || '<tr><td colspan="7" class="muted">Nincs találat.</td></tr>';
+  updatePalletSel();
 }
+state.palletSel = new Set();
+function updatePalletSel() {
+  const n = state.palletSel.size, all = state.pallets?.length || 0;
+  const b = $('#pallet-print-sel');
+  b.disabled = !n;
+  b.textContent = n ? `Kijelöltek nyomtatása (${n})` : 'Kijelöltek nyomtatása';
+  const a = $('#pallet-sel-all');
+  a.checked = all > 0 && n === all;
+  a.indeterminate = n > 0 && n < all;
+}
+$('#pallet-sel-all').addEventListener('change', (e) => {
+  state.palletSel = new Set(e.target.checked ? (state.pallets || []).map((p) => p.id) : []);
+  $$('#pallet-table [data-pallet-sel]').forEach((c) => { c.checked = e.target.checked; c.closest('tr').classList.toggle('checked', e.target.checked); });
+  updatePalletSel();
+});
+$('#pallet-print-sel').addEventListener('click', async (e) => {
+  const list = (state.pallets || []).filter((p) => state.palletSel.has(p.id));
+  if (!list.length) return;
+  if (list.length > 1 && !confirm(`${list.length} címke nyomtatása?\n${list.map((p) => p.serial).join(', ')}`)) return;
+  e.target.disabled = true;
+  state.palletSel.clear(); loadPalletTable();
+  await printPalletLabels(list);
+});
 $('#pallet-filter').addEventListener('change', loadPalletTable);
 $('#pallet-table').addEventListener('change', async (e) => {
+  const c = e.target.closest('[data-pallet-sel]');
+  if (c) {
+    const id = +c.dataset.palletSel;
+    if (c.checked) state.palletSel.add(id); else state.palletSel.delete(id);
+    c.closest('tr').classList.toggle('checked', c.checked);
+    updatePalletSel(); return;
+  }
   const s = e.target.closest('[data-pallet-status]');
   if (!s) return;
   await api(`/api/pallets/${s.dataset.palletStatus}`, { method: 'PATCH', body: { status: s.value } });

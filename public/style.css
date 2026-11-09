@@ -181,3 +181,10 @@ form.demold { margin-top: 12px; }
 .kv.big { font-size: 1.05rem; gap: 6px 24px; }
 .kv.big b { font-size: 1.35rem; }
 .chart-box--sub { height: 200px; margin-top: 4px; }
+
+/* Raklapok: kijelölés és csoportos nyomtatás */
+.pallet-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.pallet-toolbar .filters { margin-bottom: 0; flex: 1 1 200px; }
+th.sel, td.sel { width: 36px; padding-left: 2px; padding-right: 2px; text-align: center; }
+td.sel input, th.sel input { width: 20px; height: 20px; accent-color: var(--red); cursor: pointer; }
+#pallet-table tr.checked td { background: color-mix(in srgb, var(--red) 8%, transparent); }

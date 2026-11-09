@@ -122,8 +122,11 @@
       </div>
       <div class="card">
         <h2>Raklapok</h2>
-        <div class="filters"><select id="pallet-filter"></select></div>
-        <div class="table-wrap"><table id="pallet-table"><thead><tr><th>Sorszám</th><th>Minta</th><th class="num">Db</th><th>Öntve</th><th>Kiforgatva</th><th>Státusz</th></tr></thead><tbody></tbody></table></div>
+        <div class="pallet-toolbar">
+          <div class="filters"><select id="pallet-filter"></select></div>
+          <button class="btn sm primary" id="pallet-print-sel" type="button" disabled>Kijelöltek nyomtatása</button>
+        </div>
+        <div class="table-wrap"><table id="pallet-table"><thead><tr><th class="sel"><input type="checkbox" id="pallet-sel-all" aria-label="Összes kijelölése"></th><th>Sorszám</th><th>Minta</th><th class="num">Db</th><th>Öntve</th><th>Kiforgatva</th><th>Státusz</th></tr></thead><tbody></tbody></table></div>
       </div>
     </section>
 

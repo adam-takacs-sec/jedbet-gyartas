@@ -55,10 +55,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: .8rem; }
 .card-head h2 { margin: 0; }
-.grid2 { display: grid; gap: 16px; grid-template-columns: 1fr; }
+.grid2 { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.grid2 > * { min-width: 0; }
 .grid2 > .card { margin-bottom: 0; }
 .grid2 { margin-bottom: 16px; }
-@media (min-width: 860px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 860px) { .grid2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 
 label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 10px; }
 label > input, label > select, .qty input {
@@ -184,7 +185,8 @@ form.demold { margin-top: 12px; }
 
 /* Raklapok: kijelölés és csoportos nyomtatás */
 .pallet-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-.pallet-toolbar .filters { margin-bottom: 0; flex: 1 1 200px; }
+.pallet-toolbar .filters { margin-bottom: 0; flex: 1 1 160px; max-width: 260px; }
+.pallet-toolbar .btn { min-height: 40px; }
 th.sel, td.sel { width: 36px; padding-left: 2px; padding-right: 2px; text-align: center; }
 td.sel input, th.sel input { width: 20px; height: 20px; accent-color: var(--red); cursor: pointer; }
 #pallet-table tr.checked td { background: color-mix(in srgb, var(--red) 8%, transparent); }

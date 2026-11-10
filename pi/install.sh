@@ -67,16 +67,59 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
+# --- Hálózatfigyelő: ha elmegy a wifi, magától újracsatlakozik (lásd netwatch.sh)
+sudo install -m 755 netwatch.sh /usr/local/bin/jedbet-netwatch
+sudo tee /etc/systemd/system/jedbet-netwatch.service >/dev/null <<'UNIT'
+[Unit]
+Description=JEDBET hálózatfigyelő
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/jedbet-netwatch
+UNIT
+sudo tee /etc/systemd/system/jedbet-netwatch.timer >/dev/null <<'UNIT'
+[Unit]
+Description=JEDBET hálózatfigyelő, percenként
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+[Install]
+WantedBy=timers.target
+UNIT
+
+# --- Wifi energiatakarékos mód ki (Pi Zero 2-n emiatt szokott leesni a wifi)
+if [ -d /etc/NetworkManager/conf.d ]; then
+  sudo tee /etc/NetworkManager/conf.d/jedbet-wifi-powersave.conf >/dev/null <<'UNIT'
+[connection]
+wifi.powersave = 2
+UNIT
+fi
+sudo iw dev wlan0 set power_save off 2>/dev/null || true
+
+# --- Hardveres watchdog: ha a Pi teljesen lefagy, magától újraindul
+sudo mkdir -p /etc/systemd/system.conf.d
+sudo tee /etc/systemd/system.conf.d/jedbet-watchdog.conf >/dev/null <<'UNIT'
+[Manager]
+RuntimeWatchdogSec=15
+RebootWatchdogSec=2min
+UNIT
+sudo systemctl daemon-reexec
+
+# --- A napló maradjon meg újraindítás után is (hibakereséshez)
+sudo mkdir -p /var/log/journal
+sudo systemctl restart systemd-journald
+
 for s in beton_monitor jedbet concrete cloudflared; do
   sudo systemctl disable --now "$s.service" 2>/dev/null || true
 done
 sudo systemctl daemon-reload
 sudo systemctl enable --now niimbot-rfcomm.service
 sudo systemctl enable jedbet-agent.service
+sudo systemctl enable --now jedbet-netwatch.timer
 sudo systemctl restart jedbet-agent.service
 
 echo
-echo "Kész. Napló: journalctl -u jedbet-agent -f"
+echo "Kész. Napló: journalctl -u jedbet-agent -f   |   Hálózatfigyelő: journalctl -t jedbet-netwatch"
 if [ "${NEW_TOKEN:-}" = 1 ]; then
   echo
   echo "Ezt a tokent kell beírni a Cloudflare-ben DEVICE_TOKEN titokként:"

@@ -387,3 +387,49 @@ label { font-weight: 600; }
 @media (max-width: 420px) { .form2 { grid-template-columns: minmax(0, 1fr); } }
 .dialog .card-head { margin-bottom: 14px; }
 .dialog .btn.big { margin-top: 4px; }
+
+/* Munkák: projektkártyák */
+.job-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); margin-bottom: 16px; }
+.job-card {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px; text-align: left; font: inherit; color: var(--ink); cursor: pointer;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); transition: border-color .15s;
+}
+.job-card:hover { border-color: var(--muted); }
+.job-card.active { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+.job-card.done { opacity: .7; }
+.job-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.job-top b { font-size: 1.05rem; }
+.job-foot { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); }
+.job-foot b { color: var(--ink); }
+.chip-s { flex-shrink: 0; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--input); color: var(--muted); white-space: nowrap; }
+.chip-s.warn { background: var(--warn); color: #111; } .chip-s.bad { background: var(--danger); color: #fff; } .chip-s.ok { background: var(--ok); color: #fff; }
+
+/* Szakasz-csík (hossz arányában) */
+.strip { position: relative; display: flex; gap: 2px; height: 34px; border-radius: 6px; overflow: hidden; }
+.strip > span {
+  min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 6px; overflow: hidden;
+  background: color-mix(in srgb, var(--c) 30%, var(--input)); border-bottom: 4px solid var(--c);
+}
+.strip em { font-style: normal; font-size: .72rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strip small { font-size: .66rem; color: var(--muted); white-space: nowrap; }
+.strip.empty { background: var(--input); align-items: center; justify-content: center; font-size: .75rem; color: var(--muted); }
+.strip-done { position: absolute; left: 0; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, rgba(0,0,0,.28) 0 6px, rgba(0,0,0,.12) 6px 12px); pointer-events: none; border-right: 2px solid var(--ok); }
+.overview .strip { height: 46px; }
+.overview .strip em { font-size: .85rem; }
+.overview .strip small { font-size: .75rem; }
+.overview { margin-top: 12px; }
+#job-detail .card-head h2 { margin-bottom: 2px; }
+#job-detail .card-head { align-items: flex-start; }
+
+/* Szakaszok kerítésrajzzal */
+.stage { border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: var(--input); }
+.stage-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+.stage-no { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 8px; border-radius: 50%; background: var(--c); color: #fff; font-size: .75rem; font-weight: 800; vertical-align: 1px; }
+.tpl-chip { font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--c) 25%, transparent); color: var(--ink); border: 1px solid var(--c); margin-left: 4px; }
+.fence-wrap { display: grid; gap: 6px; }
+.fence { display: block; height: auto; max-width: 100%; overflow: visible; }
+.stage-preview { margin: 4px 0 12px; padding: 12px; border-radius: 8px; background: var(--input); }
+.stage-preview p { margin: 8px 0 0; }
+.lg.post-end { width: 6px; height: 14px; background: #5c6066; }
+.lg.post-mid { width: 4px; height: 14px; background: #7d8288; }
+#jd-legend { margin-top: 4px; }

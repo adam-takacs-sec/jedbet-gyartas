@@ -403,10 +403,13 @@ async function routeApi(request, env, url, user) {
 
   // --- Munkák ---
   if (p === '/api/jobs' && m === 'GET') {
-    const { results } = await db.prepare(
-      `SELECT j.*, (SELECT COALESCE(SUM(length_m),0) FROM job_stages WHERE job_id = j.id) AS total_m
-       FROM jobs j ORDER BY (j.status = 'Aktív') DESC, j.id DESC`).all();
-    return json(results);
+    const [{ results }, { results: stages }] = await db.batch([
+      db.prepare(`SELECT j.*, (SELECT COALESCE(SUM(length_m),0) FROM job_stages WHERE job_id = j.id) AS total_m,
+         (SELECT COALESCE(SUM(done_qty),0) FROM tasks WHERE job_id = j.id AND kind = 'telepites') AS done_m
+       FROM jobs j ORDER BY (j.status = 'Aktív') DESC, j.id DESC`),
+      db.prepare('SELECT id, job_id, stage_name, length_m, template FROM job_stages ORDER BY id'),
+    ]);
+    return json(results.map((j) => ({ ...j, stages: stages.filter((s) => s.job_id === j.id) })));
   }
   if (p === '/api/jobs' && m === 'POST') {
     const b = await body(request);
@@ -419,9 +422,14 @@ async function routeApi(request, env, url, user) {
   }
   if ((r = p.match(/^\/api\/jobs\/(\d+)$/)) && m === 'PATCH') {
     const b = await body(request);
-    const status = str(b.status, 'státusz', { required: true });
+    const cur = await db.prepare('SELECT * FROM jobs WHERE id = ?').bind(+r[1]).first();
+    if (!cur) notFound();
+    const status = b.status === undefined ? cur.status : str(b.status, 'státusz', { required: true });
     if (!['Aktív', 'Befejezett'].includes(status)) bad('Ismeretlen státusz');
-    await db.prepare('UPDATE jobs SET status = ? WHERE id = ?').bind(status, +r[1]).run();
+    const f = (k, name, max) => (b[k] === undefined ? cur[k] : str(b[k], name, { max, required: k === 'name' }));
+    await db.prepare('UPDATE jobs SET status = ?, name = ?, client_name = ?, phone = ?, location = ?, deadline = ? WHERE id = ?')
+      .bind(status, f('name', 'projekt neve', 120), f('client_name', 'megrendelő', 120), f('phone', 'telefon', 40),
+        f('location', 'helyszín', 200), f('deadline', 'határidő', 20), cur.id).run();
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/jobs\/(\d+)\/stages$/)) && m === 'POST') {
@@ -431,6 +439,16 @@ async function routeApi(request, env, url, user) {
     await db.prepare('INSERT INTO job_stages (job_id, stage_name, length_m, template, note) VALUES (?,?,?,?,?)')
       .bind(+r[1], str(b.stage_name, 'szakasz neve', { required: true, max: 120 }),
         num(b.length_m, 'hossz', { min: 0.5, max: 5000 }), template, str(b.note, 'megjegyzés')).run();
+    return json({ ok: true });
+  }
+  if ((r = p.match(/^\/api\/stages\/(\d+)$/)) && m === 'PATCH') {
+    const b = await body(request);
+    const template = str(b.template, 'minta', { required: true });
+    if (!PANEL_TEMPLATES.includes(template)) bad('Ismeretlen minta');
+    const res = await db.prepare('UPDATE job_stages SET stage_name = ?, length_m = ?, template = ?, note = ? WHERE id = ?')
+      .bind(str(b.stage_name, 'szakasz neve', { required: true, max: 120 }), num(b.length_m, 'hossz', { min: 0.5, max: 5000 }),
+        template, str(b.note, 'megjegyzés'), +r[1]).run();
+    if (!res.meta.changes) notFound();
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/stages\/(\d+)$/)) && m === 'DELETE') {

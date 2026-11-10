@@ -231,42 +231,74 @@
 
     <!-- MUNKÁK -->
     <section id="tab-munkak" class="tab" hidden>
-      <div class="grid2">
-        <div class="card">
-          <h2>Projektek</h2>
-          <div id="jobs" class="list"></div>
-          <details class="sub">
-            <summary>Új projekt</summary>
-            <form id="job-form">
-              <label>Projekt neve<input name="name" required maxlength="120"></label>
-              <label>Megrendelő<input name="client_name" maxlength="120"></label>
-              <label>Telefon<input name="phone" type="tel" maxlength="40"></label>
-              <label>Helyszín<input name="location" maxlength="200"></label>
-              <label>Határidő<input name="deadline" type="date"></label>
-              <button class="btn primary" type="submit">Létrehozás</button>
-            </form>
-          </details>
+      <div class="plan-bar">
+        <div class="seg" role="group" aria-label="Szűrés">
+          <button type="button" data-job-filter="Aktív">Aktív</button>
+          <button type="button" data-job-filter="Befejezett">Befejezett</button>
+          <button type="button" data-job-filter="">Mind</button>
         </div>
-        <div class="card" id="job-detail" hidden>
-          <div class="card-head"><h2 id="jd-name"></h2><button class="btn" id="jd-status"></button></div>
-          <p class="muted" id="jd-meta"></p>
-          <h3>Szakaszok</h3>
-          <div id="jd-stages" class="list"></div>
-          <form id="stage-form" class="row3">
-            <label>Szakasz<input name="stage_name" required maxlength="120" placeholder="pl. Utcafront"></label>
-            <label>Hossz (m)<input name="length_m" type="number" step="any" min="0.5" required></label>
-            <label>Minta<select name="template" id="stage-template"></select></label>
-            <label class="span3">Megjegyzés<input name="note" maxlength="500"></label>
-            <button class="btn primary" type="submit">Szakasz hozzáadása</button>
-          </form>
-          <h3>Anyagigény és raktár</h3>
-          <div class="table-wrap"><table id="jd-summary"><thead><tr><th>Tétel</th><th class="num">Kell</th><th class="num">Raktáron</th><th class="num">Hiányzik</th></tr></thead><tbody></tbody></table></div>
-          <p class="muted small">2 m = 1 oszlopköz = 4 panel. Szakaszonként 2 végoszlop, közte középoszlopok.</p>
-          <h3>Telepítés haladása</h3>
-          <div id="jd-install"></div>
+        <span class="spacer"></span>
+        <button class="btn primary" type="button" id="job-new">+ Új projekt</button>
+      </div>
+      <div id="jobs" class="job-grid"></div>
+
+      <div id="job-detail" hidden>
+        <div class="card">
+          <div class="card-head">
+            <div><h2 id="jd-name"></h2><p class="muted small" id="jd-meta"></p></div>
+            <button class="btn sm" id="jd-status" type="button"></button>
+          </div>
+          <div id="jd-tiles" class="hero-stats"></div>
+          <div id="jd-overview"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Szakaszok</h2><button class="btn primary sm" type="button" id="stage-new">+ Szakasz</button></div>
+          <div id="jd-stages"></div>
+          <div class="legend small muted" id="jd-legend"></div>
+        </div>
+
+        <div class="grid2">
+          <div class="card">
+            <h2>Anyagigény és raktár</h2>
+            <div class="table-wrap"><table id="jd-summary"><thead><tr><th>Tétel</th><th class="num">Kell</th><th class="num">Raktáron</th><th class="num">Hiányzik</th></tr></thead><tbody></tbody></table></div>
+            <p class="muted small">2 m = 1 oszlopköz = 4 panel. Szakaszonként 2 végoszlop, közte középoszlopok.</p>
+          </div>
+          <div class="card">
+            <h2>Telepítés haladása</h2>
+            <div id="jd-install"></div>
+          </div>
         </div>
       </div>
     </section>
+
+    <dialog id="job-dialog" class="dialog narrow" aria-labelledby="job-dialog-title">
+      <form id="job-form">
+        <div class="card-head"><h2 id="job-dialog-title">Új projekt</h2><button class="btn sm" type="button" data-close-dialog>Mégse</button></div>
+        <div class="form2">
+          <label class="full">Projekt neve<input name="name" required maxlength="120" placeholder="pl. Bana, Kossuth u. 12"></label>
+          <label>Megrendelő<input name="client_name" maxlength="120"></label>
+          <label>Telefon<input name="phone" type="tel" maxlength="40"></label>
+          <label>Helyszín<input name="location" maxlength="200"></label>
+          <label>Határidő<input name="deadline" type="date"></label>
+        </div>
+        <button class="btn primary big" type="submit">Létrehozás</button>
+      </form>
+    </dialog>
+
+    <dialog id="stage-dialog" class="dialog narrow" aria-labelledby="stage-dialog-title">
+      <form id="stage-form">
+        <div class="card-head"><h2 id="stage-dialog-title">Új szakasz</h2><button class="btn sm" type="button" data-close-dialog>Mégse</button></div>
+        <div class="form2">
+          <label class="full">Szakasz neve<input name="stage_name" required maxlength="120" placeholder="pl. Utcafront"></label>
+          <label>Hossz (m)<input name="length_m" type="number" inputmode="decimal" step="any" min="0.5" required></label>
+          <label>Minta<select name="template" id="stage-template"></select></label>
+          <label class="full">Megjegyzés<input name="note" maxlength="500"></label>
+        </div>
+        <div id="stage-preview" class="stage-preview"></div>
+        <button class="btn primary big" type="submit">Hozzáadás</button>
+      </form>
+    </dialog>
 
     <!-- MUNKÁSOK -->
     <section id="tab-munkasok" class="tab" hidden>

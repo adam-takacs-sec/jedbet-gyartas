@@ -2,6 +2,7 @@
 
 import { $, $$, esc, fmt, fmtTime, ago, api, toast, formData, ft } from './lib.js';
 import { initNap, loadNap, loadWorkers } from './nap.js';
+import { initJobs, loadJobs } from './munkak.js';
 
 const state = { config: null, mix: null, mixes: [], sensors: [], charts: {}, selectedJob: null, openRun: null };
 
@@ -647,71 +648,6 @@ $('#stock-form').addEventListener('submit', async (e) => {
 });
 
 // ===================================================================
-// Munkák
-// ===================================================================
-async function loadJobs() {
-  const jobs = await api('/api/jobs');
-  $('#jobs').innerHTML = jobs.map((j) => `<button class="item ${state.selectedJob?.id === j.id ? 'active' : ''}" data-job="${j.id}">
-    <span><b>${esc(j.name)}</b><br><span class="muted small">${esc(j.location || '')}${j.deadline ? ' · határidő: ' + esc(j.deadline) : ''}</span></span>
-    <span class="small ${j.status === 'Aktív' ? '' : 'muted'}">${esc(j.status)} · ${fmt(j.total_m, 0)} m</span></button>`).join('')
-    || '<p class="muted">Nincs projekt.</p>';
-  state.jobs = jobs;
-  if (state.selectedJob) showJob(state.selectedJob.id);
-}
-$('#jobs').addEventListener('click', (e) => { const b = e.target.closest('[data-job]'); if (b) showJob(+b.dataset.job); });
-
-async function showJob(id) {
-  const j = state.jobs.find((x) => x.id === id);
-  if (!j) return;
-  state.selectedJob = j;
-  $$('#jobs [data-job]').forEach((b) => b.classList.toggle('active', +b.dataset.job === id));
-  $('#job-detail').hidden = false;
-  $('#jd-name').textContent = j.name;
-  $('#jd-status').textContent = j.status === 'Aktív' ? 'Befejezettnek jelöl' : 'Újranyitás';
-  $('#jd-meta').innerHTML = [j.client_name, j.phone && `<a href="tel:${esc(j.phone.replace(/\s/g, ''))}">${esc(j.phone)}</a>`, j.location, j.deadline && 'határidő: ' + j.deadline]
-    .filter(Boolean).map((x) => (x.startsWith('<a') ? x : esc(x))).join(' · ');
-  const s = await api(`/api/jobs/${id}/summary`);
-  $('#jd-stages').innerHTML = s.stages.map((x) => `<div class="item"><span><b>${esc(x.stage_name)}</b> · ${fmt(x.length_m, 1)} m · ${esc(x.template)}
-    <br><span class="muted small">${x.spans} köz · ${x.panels} panel · ${x.veg} vég + ${x.kozep} közép oszlop${x.note ? ' · ' + esc(x.note) : ''}</span></span>
-    <button class="btn sm" data-del-stage="${x.id}">Törlés</button></div>`).join('') || '<p class="muted">Nincs szakasz.</p>';
-  $('#jd-summary tbody').innerHTML = s.summary.map((x) => `<tr><td>${esc(x.item)}</td><td class="num">${x.needed}</td>
-    <td class="num">${x.in_stock}</td><td class="num ${x.missing ? 'neg' : ''}">${x.missing}</td></tr>`).join('')
-    || '<tr><td colspan="4" class="muted">Adj hozzá szakaszt.</td></tr>';
-  const ins = s.install;
-  const pct = ins.total_m ? Math.min(100, Math.round((ins.done_m / ins.total_m) * 100)) : 0;
-  $('#jd-install').innerHTML = `
-    <div class="bar ${pct >= 100 ? 'done' : ''}"><i style="width:${pct}%"></i></div>
-    <div class="kv">
-      <span>Kész: <b>${fmt(ins.done_m, 0)} / ${fmt(ins.total_m, 0)} m</b> (${pct}%)</span>
-      <span>Munkaóra: <b>${fmt(ins.hours, 1)} óra</b> · ${ins.work_days} nap</span>
-      <span>Bérköltség: <b>${ft(ins.cost)}</b></span>
-      <span>m / munkaóra: <b>${ins.hours ? fmt(ins.done_m / ins.hours, 1) : '–'}</b></span>
-    </div>
-    ${ins.days.length ? `<div class="list">${ins.days.map((d) => `<div class="item small"><span><b>${esc(d.day)}</b> · ${fmt(d.done_m, 0)} m</span><span class="muted">${esc(d.workers || '')}</span></div>`).join('')}</div>`
-      : '<p class="muted small">A telepítést a Napi lapon rögzítsd: Telepítés feladat ennél a projektnél.</p>'}`;
-}
-$('#jd-status').addEventListener('click', async () => {
-  const j = state.selectedJob;
-  await api(`/api/jobs/${j.id}`, { method: 'PATCH', body: { status: j.status === 'Aktív' ? 'Befejezett' : 'Aktív' } });
-  loadJobs();
-});
-$('#jd-stages').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-del-stage]');
-  if (b && confirm('Törlöd a szakaszt?')) { await api(`/api/stages/${b.dataset.delStage}`, { method: 'DELETE' }); showJob(state.selectedJob.id); loadJobs(); }
-});
-$('#job-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const res = await api('/api/jobs', { method: 'POST', body: formData(e.target) });
-  e.target.reset(); e.target.closest('details').open = false;
-  state.selectedJob = { id: res.job_id }; await loadJobs(); showJob(res.job_id);
-});
-$('#stage-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  await api(`/api/jobs/${state.selectedJob.id}/stages`, { method: 'POST', body: formData(e.target) });
-  e.target.reset(); showJob(state.selectedJob.id); loadJobs();
-});
-
-// ===================================================================
 // Állapotsor
 // ===================================================================
 async function loadStatus() {
@@ -769,7 +705,7 @@ async function loadWeather() {
 (async function init() {
   state.config = await api('/api/config');
   $('#pour-template').innerHTML = state.config.templates.map((t) => `<option>${esc(t)}</option>`).join('');
-  $('#stage-template').innerHTML = state.config.panelTemplates.map((t) => `<option>${esc(t)}</option>`).join('');
+  initJobs(state.config);
   $('#pallet-filter').innerHTML = '<option value="">Minden státusz</option>' + state.config.palletStatuses.map((s) => `<option>${esc(s)}</option>`).join('');
   await initNap(state.config);
   let tab = 'nap';

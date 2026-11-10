@@ -472,3 +472,50 @@ label { font-weight: 600; }
 .tv-btns button { width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--line); background: rgba(35,38,42,.92); color: var(--ink); font: inherit; font-size: 1.2rem; font-weight: 700; cursor: pointer; }
 .tv-btns button:hover { border-color: var(--muted); }
 .stage-row { cursor: pointer; }
+
+/* Telek-térkép */
+.map-wrap { position: relative; border-radius: 8px; overflow: hidden; border: 1px solid #2a2d31; }
+.plot-map { height: 440px; background: #16181b; }
+@media (max-width: 600px) { .plot-map { height: 340px; } }
+.map-search { position: absolute; z-index: 500; top: 10px; left: 54px; right: 10px; max-width: 420px; display: flex; gap: 6px; flex-wrap: wrap; }
+.map-search input { flex: 1; min-width: 0; height: 38px; padding: 0 10px; font: inherit; font-size: .95rem; color: var(--ink); background: rgba(27,29,32,.92); border: 1px solid var(--line); border-radius: 8px; }
+.map-search .btn { height: 38px; min-height: 38px; background: rgba(35,38,42,.95); }
+.map-results { flex-basis: 100%; display: grid; background: rgba(27,29,32,.97); border: 1px solid var(--line); border-radius: 8px; max-height: 220px; overflow: auto; }
+.map-results button { text-align: left; padding: 8px 10px; background: none; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); font: inherit; font-size: .85rem; cursor: pointer; }
+.map-results button:hover { background: var(--input); }
+.map-hint { position: absolute; z-index: 500; left: 10px; right: 10px; bottom: 26px; padding: 8px 12px; border-radius: 8px; background: rgba(27,29,32,.9); font-size: .85rem; pointer-events: none; }
+.leaflet-container { font: inherit; }
+.leaflet-control-attribution { background: rgba(0,0,0,.5) !important; color: #bbb !important; font-size: 10px; }
+.leaflet-control-attribution a { color: #ddd !important; }
+.leaflet-bar a { background: rgba(35,38,42,.95) !important; color: var(--ink) !important; border-color: var(--line) !important; }
+.side-label span { display: inline-block; transform: translate(-50%, -50%); white-space: nowrap; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.72); color: #fff; font-size: .75rem; border: 1px solid rgba(255,255,255,.25); }
+.side-label b { color: #fff; margin-right: 3px; }
+.stage-label span { display: grid; place-items: center; width: 22px; height: 22px; transform: translate(-50%, -50%); border-radius: 50%; background: #4a4e54; color: #fff; font-size: .75rem; font-weight: 800; border: 2px solid #fff; }
+.stage-label span.part { background: #2c3035; border-color: var(--red); }
+.stage-label span.ok { background: var(--red); }
+.vtx span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; background: #fff; border: 3px solid var(--red); color: var(--red); font-size: .65rem; font-weight: 800; box-sizing: border-box; cursor: move; }
+.vtx-add span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,.7); border: 1px solid #fff; color: #fff; font-weight: 800; cursor: pointer; }
+.sides { margin-top: 12px; }
+.sides-table td { vertical-align: middle; white-space: normal; }
+.side-tag { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; background: var(--input); font-weight: 800; }
+.len-in { width: 110px; height: 38px; padding: 4px 8px; font: inherit; color: var(--ink); background: var(--input); border: 1px solid var(--line); border-radius: 6px; }
+
+/* Kiterített szakaszok */
+.band-row { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.band-row:last-child { border-bottom: 0; }
+.band-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.band-title { flex: 1; min-width: 0; }
+.band-done { text-align: right; white-space: nowrap; font-size: .85rem; color: var(--muted); }
+.band-done b { font-size: 1.15rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.band-wrap { margin-top: 6px; touch-action: pan-y; cursor: ew-resize; user-select: none; -webkit-user-select: none; }
+.band { display: block; max-width: 100%; height: auto; }
+.tpl-chip { font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--c) 25%, transparent); border: 1px solid var(--c); }
+.stage-no { display: inline-grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; background: #4a4e54; color: #fff; font-size: .78rem; font-weight: 800; }
+.stage-no.part { background: #2c3035; box-shadow: inset 0 0 0 2px var(--red); }
+.stage-no.ok { background: var(--red); }
+@media (max-width: 560px) { .band-head { flex-wrap: wrap; } .band-done { text-align: left; } }
+.mini-plot { width: 100%; height: 100%; }
+.mini-bars { display: flex; gap: 3px; width: 90%; height: 10px; margin-bottom: 6px; }
+.mini-bars span { background: #6b6f75; border-radius: 2px; overflow: hidden; }
+.mini-bars i { display: block; height: 100%; background: var(--red); }
+.job-thumb { flex-direction: column; display: flex; align-items: center; justify-content: center; }

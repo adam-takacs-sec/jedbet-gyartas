@@ -6,6 +6,7 @@
   <meta name="robots" content="noindex, nofollow" />
   <title>JEDBET Gyártás</title>
   <link rel="icon" href="/JEDBET-pecset-sotet.svg" />
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -250,13 +251,27 @@
             <button class="btn sm" id="jd-status" type="button"></button>
           </div>
           <div id="jd-tiles" class="hero-stats"></div>
-          <div id="jd-overview"></div>
+          <div class="progress" id="jd-progress"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Telek</h2><div class="row-btns wrap" id="plot-tools"></div></div>
+          <div class="map-wrap">
+            <form class="map-search" id="map-search" autocomplete="off">
+              <input name="q" placeholder="Cím keresése, pl. Bana, Petőfi u. 20" aria-label="Cím keresése">
+              <button class="btn sm" type="submit">Keres</button>
+              <div class="map-results" id="map-results" hidden></div>
+            </form>
+            <div id="plot-map" class="plot-map"></div>
+            <div class="map-hint" id="map-hint" hidden></div>
+          </div>
+          <div id="plot-sides" class="sides"></div>
         </div>
 
         <div class="card">
           <div class="card-head"><h2>Szakaszok</h2><button class="btn primary sm" type="button" id="stage-new">+ Szakasz</button></div>
-          <div id="jd-stages"></div>
-          <div class="legend small muted" id="jd-legend"></div>
+          <div id="jd-bands"></div>
+          <p class="muted small" id="bands-hint"></p>
         </div>
 
         <div class="grid2">
@@ -266,7 +281,7 @@
             <p class="muted small">2 m = 1 oszlopköz = 4 panel. Szakaszonként 2 végoszlop, közte középoszlopok.</p>
           </div>
           <div class="card">
-            <h2>Telepítés haladása</h2>
+            <h2>Munka a projekten</h2>
             <div id="jd-install"></div>
           </div>
         </div>
@@ -292,9 +307,10 @@
         <div class="card-head"><h2 id="stage-dialog-title">Új szakasz</h2><button class="btn sm" type="button" data-close-dialog>Mégse</button></div>
         <div class="form2">
           <label class="full">Szakasz neve<input name="stage_name" required maxlength="120" placeholder="pl. Utcafront"></label>
+          <label class="full" data-for="side">Telek oldala<select name="side" id="stage-side"></select></label>
+          <label data-for="from">Kezdés az oldal elejétől (m)<input name="from_m" type="number" inputmode="decimal" step="any" min="0" value="0"></label>
           <label>Hossz (m)<input name="length_m" type="number" inputmode="decimal" step="any" min="0.5" required></label>
           <label>Minta<select name="template" id="stage-template"></select></label>
-          <label class="full" data-for="turn">Merre megy az előző szakasz végétől?<select name="turn" id="stage-turn"></select></label>
           <label class="full">Megjegyzés<input name="note" maxlength="500"></label>
         </div>
         <div id="stage-preview" class="stage-preview"></div>
@@ -339,6 +355,7 @@
 
   <script src="/vendor/qrcode.js"></script>
   <script src="/vendor/chart.umd.js"></script>
+  <script src="/vendor/leaflet/leaflet.js"></script>
   <script src="/app.js" type="module"></script>
 </body>
 </html>

@@ -404,14 +404,15 @@ async function routeApi(request, env, url, user) {
   // --- Munkák ---
   if (p === '/api/jobs' && m === 'GET') {
     const [{ results }, { results: stages }, { results: sums }] = await db.batch([
-      db.prepare(`SELECT j.*, (SELECT COALESCE(SUM(length_m),0) FROM job_stages WHERE job_id = j.id) AS total_m,
-         (SELECT COALESCE(SUM(done_qty),0) FROM tasks WHERE job_id = j.id AND kind = 'telepites') AS done_m
+      db.prepare(`SELECT j.*, (SELECT COALESCE(SUM(length_m),0) FROM job_stages WHERE job_id = j.id) AS total_m
        FROM jobs j ORDER BY (j.status = 'Aktív') DESC, j.id DESC`),
-      db.prepare('SELECT id, job_id, stage_name, length_m, template, turn FROM job_stages ORDER BY id'),
+      db.prepare('SELECT id, job_id, stage_name, length_m, template, turn, side, from_m, done_manual FROM job_stages ORDER BY id'),
       db.prepare(`${DONE_SQL} GROUP BY job_id, stage_id`),
-    ]).then((r) => [r[0], r[1], r[2]]);
-    return json(results.map((j) => ({ ...j,
-      stages: allocateDone(stages.filter((x) => x.job_id === j.id), sums.filter((x) => x.job_id === j.id)) })));
+    ]);
+    return json(results.map((j) => {
+      const st = allocateDone(stages.filter((x) => x.job_id === j.id), sums.filter((x) => x.job_id === j.id));
+      return { ...j, plot: parsePlot(j.plot), stages: st, done_m: st.reduce((a, x) => a + x.done_m, 0) };
+    }));
   }
   if (p === '/api/jobs' && m === 'POST') {
     const b = await body(request);
@@ -429,29 +430,31 @@ async function routeApi(request, env, url, user) {
     const status = b.status === undefined ? cur.status : str(b.status, 'státusz', { required: true });
     if (!['Aktív', 'Befejezett'].includes(status)) bad('Ismeretlen státusz');
     const f = (k, name, max) => (b[k] === undefined ? cur[k] : str(b[k], name, { max, required: k === 'name' }));
-    await db.prepare('UPDATE jobs SET status = ?, name = ?, client_name = ?, phone = ?, location = ?, deadline = ? WHERE id = ?')
+    const plot = b.plot === undefined ? cur.plot : b.plot === null ? null : JSON.stringify(validPlot(b.plot));
+    await db.prepare('UPDATE jobs SET status = ?, name = ?, client_name = ?, phone = ?, location = ?, deadline = ?, plot = ? WHERE id = ?')
       .bind(status, f('name', 'projekt neve', 120), f('client_name', 'megrendelő', 120), f('phone', 'telefon', 40),
-        f('location', 'helyszín', 200), f('deadline', 'határidő', 20), cur.id).run();
+        f('location', 'helyszín', 200), f('deadline', 'határidő', 20), plot, cur.id).run();
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/jobs\/(\d+)\/stages$/)) && m === 'POST') {
     const b = await body(request);
-    const template = str(b.template, 'minta', { required: true });
-    if (!PANEL_TEMPLATES.includes(template)) bad('Ismeretlen minta');
-    await db.prepare('INSERT INTO job_stages (job_id, stage_name, length_m, template, note, turn) VALUES (?,?,?,?,?,?)')
-      .bind(+r[1], str(b.stage_name, 'szakasz neve', { required: true, max: 120 }),
-        num(b.length_m, 'hossz', { min: 0.5, max: 5000 }), template, str(b.note, 'megjegyzés'),
-        num(b.turn, 'fordulás', { min: -180, max: 180, def: 90 })).run();
+    const v = stageFields(b, {});
+    await db.prepare(`INSERT INTO job_stages (job_id, stage_name, length_m, template, note, turn, side, from_m)
+      VALUES (?,?,?,?,?,?,?,?)`).bind(+r[1], v.stage_name, v.length_m, v.template, v.note, v.turn, v.side, v.from_m).run();
     return json({ ok: true });
   }
+  // Részleges módosítás: csak a megadott mezők változnak (pl. csak a kézi „idáig kész”).
   if ((r = p.match(/^\/api\/stages\/(\d+)$/)) && m === 'PATCH') {
     const b = await body(request);
-    const template = str(b.template, 'minta', { required: true });
-    if (!PANEL_TEMPLATES.includes(template)) bad('Ismeretlen minta');
-    const res = await db.prepare('UPDATE job_stages SET stage_name = ?, length_m = ?, template = ?, note = ?, turn = ? WHERE id = ?')
-      .bind(str(b.stage_name, 'szakasz neve', { required: true, max: 120 }), num(b.length_m, 'hossz', { min: 0.5, max: 5000 }),
-        template, str(b.note, 'megjegyzés'), num(b.turn, 'fordulás', { min: -180, max: 180, def: 90 }), +r[1]).run();
-    if (!res.meta.changes) notFound();
+    const cur = await db.prepare('SELECT * FROM job_stages WHERE id = ?').bind(+r[1]).first();
+    if (!cur) notFound();
+    const v = stageFields(b, cur);
+    if (b.done_manual !== undefined) {
+      v.done_manual = b.done_manual === null || b.done_manual === '' ? null : num(b.done_manual, 'kész hossz', { min: 0, max: 5000 });
+      if (v.done_manual !== null) v.done_manual = Math.min(v.done_manual, v.length_m);
+    } else v.done_manual = cur.done_manual;
+    await db.prepare(`UPDATE job_stages SET stage_name = ?, length_m = ?, template = ?, note = ?, turn = ?, side = ?, from_m = ?, done_manual = ?
+      WHERE id = ?`).bind(v.stage_name, v.length_m, v.template, v.note, v.turn, v.side, v.from_m, v.done_manual, cur.id).run();
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/stages\/(\d+)$/)) && m === 'DELETE') {
@@ -572,6 +575,7 @@ function decodePng(b64) {
 
 // Telepített hossz szakaszonként: a szakaszhoz kötött telepítések, a szakasz nélküliek pedig sorban töltik fel
 // a szakaszokat (az elsőtől kezdve), legfeljebb a szakasz hosszáig.
+// Ha a szakasznál kézzel be van állítva a kész hossz (done_manual), az az érvényes; a napi lap ettől még számol (done_auto).
 function allocateDone(stages, sums) {
   const by = Object.fromEntries(sums.filter((x) => x.stage_id).map((x) => [x.stage_id, x.m]));
   let free = sums.filter((x) => !x.stage_id || !stages.some((st) => st.id === x.stage_id)).reduce((a, x) => a + x.m, 0);
@@ -579,8 +583,41 @@ function allocateDone(stages, sums) {
     let d = Math.min(st.length_m, by[st.id] || 0);
     const add = Math.min(st.length_m - d, free);
     d += add; free -= add;
-    return { ...st, done_m: d };
+    const manual = st.done_manual !== null && st.done_manual !== undefined;
+    return { ...st, done_auto: d, done_m: manual ? Math.min(st.done_manual, st.length_m) : d, manual };
   });
+}
+
+function parsePlot(s) { try { return s ? JSON.parse(s) : null; } catch { return null; } }
+// Telek: { points: [[lat, lng], …] (3–60 pont), lengths: { oldal: méter } kézi felülírás }.
+function validPlot(p) {
+  if (!p || !Array.isArray(p.points) || p.points.length < 3 || p.points.length > 60) bad('A telekhez legalább 3 sarokpont kell');
+  const points = p.points.map((q) => {
+    if (!Array.isArray(q) || q.length !== 2) bad('Hibás telekpont');
+    const [la, ln] = q.map(Number);
+    if (!(la > -90 && la < 90 && ln > -180 && ln < 180)) bad('Hibás telekpont');
+    return [Math.round(la * 1e7) / 1e7, Math.round(ln * 1e7) / 1e7];
+  });
+  const lengths = {};
+  for (const [k, v] of Object.entries(p.lengths || {})) {
+    const i = Number(k), n = Number(v);
+    if (Number.isInteger(i) && i >= 0 && i < points.length && n > 0 && n < 5000) lengths[i] = Math.round(n * 100) / 100;
+  }
+  return { points, lengths };
+}
+function stageFields(b, cur) {
+  const pick = (k) => (b[k] === undefined ? cur[k] : b[k]);
+  const template = str(pick('template'), 'minta', { required: true });
+  if (!PANEL_TEMPLATES.includes(template)) bad('Ismeretlen minta');
+  const side = pick('side');
+  return {
+    stage_name: str(pick('stage_name'), 'szakasz neve', { required: true, max: 120 }),
+    length_m: num(pick('length_m'), 'hossz', { min: 0.5, max: 5000 }),
+    template, note: str(pick('note'), 'megjegyzés'),
+    turn: num(pick('turn'), 'fordulás', { min: -180, max: 180, def: 90 }),
+    side: side === null || side === '' || side === undefined ? null : num(side, 'oldal', { min: 0, max: 59 }),
+    from_m: num(pick('from_m'), 'kezdés', { min: 0, max: 5000, def: 0 }),
+  };
 }
 const DONE_SQL = `SELECT job_id, stage_id, SUM(done_qty) AS m FROM tasks WHERE kind = 'telepites' AND done_qty IS NOT NULL`;
 
@@ -617,7 +654,7 @@ async function jobSummary(db, jobId) {
                 GROUP BY t.day ORDER BY t.day`).bind(jobId),
   ]).then((r) => [r[0].results[0], r[1].results[0], r[2]]);
   const total_m = stages.reduce((a, s) => a + s.length_m, 0);
-  return { stages: details, summary, install: { total_m, done_m: prog.done_m, hours: labor.hours, cost: labor.cost, work_days: labor.days, days } };
+  return { stages: details, summary, install: { total_m, done_m: details.reduce((a, x) => a + x.done_m, 0), auto_m: prog.done_m, hours: labor.hours, cost: labor.cost, work_days: labor.days, days } };
 }
 
 async function runStatus(db, run, withSeries) {

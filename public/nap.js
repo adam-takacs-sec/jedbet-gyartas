@@ -92,13 +92,15 @@ const reload = () => loadNap();
 async function loadDay() {
   const d = await api(`/api/day?date=${ns.day}`);
   ns.data = d; ns.jobs = d.jobs;
+  const st = dayState(d);
   $('#plan-title').textContent = `${d.day.slice(0, 4)}. ${MONTHS[+d.day.slice(5, 7) - 1]} ${+d.day.slice(8)}., ${weekday(d.day)}${d.day === d.today ? ' · ma' : ''}`;
+  // A munkások és a végrehajtás csak a nap indítása után jelenik meg; előtte csak a terv.
+  $('#workers-card').hidden = st === 'plan';
+  $('#day-body').classList.toggle('single', st === 'plan');
+  $('#add-extra').hidden = st === 'plan';
   renderHero(d);
   renderTasks(d);
-  renderLogs(d);
-  $('#day-note').value = d.note || '';
-  $('#day-close').textContent = d.closed_at ? 'Újra lezárás' : 'Nap lezárása';
-  $('#day-reopen').hidden = !d.closed_at;
+  if (st !== 'plan') renderLogs(d);
   $('#lf-job').innerHTML = opts(d.jobs.map((j) => [j.id, j.name]), null, '—');
   $('#lf-worker').innerHTML = opts(d.workers.map((w) => [w.id, w.name]), null, 'Válassz…');
 }
@@ -115,43 +117,39 @@ function renderHero(d) {
   const isToday = d.day === d.today;
   const c = completion(d.tasks);
   const pct = c === null ? null : Math.round(c * 100);
-  const steps = [['plan', 'Terv'], ['running', 'Folyamatban'], ['closed', 'Lezárva']];
-  const idx = steps.findIndex(([k]) => k === st);
   const startMin = isoMin(d.started_at);
-  const nowMin = toMin(nowHHMM());
-  let main;
+  const planned = d.tasks.filter((t) => !t.unplanned);
+  let head, action = '';
   if (st === 'plan') {
-    const planned = d.tasks.filter((t) => !t.unplanned).length;
-    main = `<div class="hero-state"><div class="hero-big">${planned ? `${planned} feladat a tervben` : 'Még nincs terv'}</div>
-        <div class="muted">${s.poured_planned ? `Öntés terve: ${s.poured_planned} db` : 'Vegyél fel feladatokat, aztán indítsd a napot.'}</div></div>
-      ${isToday || d.day < d.today ? `<button class="btn primary hero-btn" id="hero-start" type="button">▶ Nap indítása</button>` : ''}`;
+    const pour = s.poured_planned ? ` · öntés ${s.poured_planned} db` : '';
+    head = `<div class="hero-big">${isToday ? 'Mai terv' : d.day > d.today ? 'Terv' : 'Nem indított nap'}</div>
+      <div class="muted">${planned.length ? `${planned.length} feladat${pour}` : 'Még nincs feladat. Vedd fel, mit csináltok aznap.'}</div>`;
+    if (d.day <= d.today) action = `<button class="btn primary hero-btn" id="hero-start" type="button">▶ Nap indítása</button>`;
   } else if (st === 'running') {
-    const elapsed = isToday && startMin !== null ? dur(nowMin - startMin) : '';
-    main = `<div class="hero-state"><div class="hero-big"><span class="pulse"></span>Fut a nap</div>
-        <div class="muted">Indult ${hhmm(d.started_at)}${elapsed ? ` · <b class="clock">${elapsed}</b>` : ''}</div></div>
-      <button class="btn success hero-btn" id="hero-close" type="button">■ Napzárás</button>`;
+    const elapsed = isToday && startMin !== null ? dur(toMin(nowHHMM()) - startMin) : '';
+    head = `<div class="hero-big"><span class="pulse"></span>Fut a nap</div>
+      <div class="muted">Indult ${hhmm(d.started_at)}${elapsed ? ` · <b class="clock">${elapsed}</b>` : ''}</div>`;
+    action = `<button class="btn success hero-btn" id="hero-close" type="button">■ Napzárás</button>`;
   } else {
-    const len = startMin !== null ? dur(isoMin(d.closed_at) - startMin) : '';
-    main = `<div class="hero-state"><div class="hero-big">✓ Lezárva</div>
-        <div class="muted">${d.started_at ? `${hhmm(d.started_at)} – ` : ''}${hhmm(d.closed_at)}${len && d.closed_at.slice(0, 10) <= d.day ? ` · ${len}` : ''}</div></div>`;
+    const len = startMin !== null && d.closed_at.slice(0, 10) <= d.day ? ` · ${dur(isoMin(d.closed_at) - startMin)}` : '';
+    head = `<div class="hero-big">✓ Lezárva</div>
+      <div class="muted">${d.started_at ? `${hhmm(d.started_at)} – ` : ''}${hhmm(d.closed_at)}${len}${d.note ? ` · ${esc(d.note)}` : ''}</div>`;
+    action = `<button class="btn sm" id="hero-reopen" type="button">Újranyitás</button>`;
   }
-  const parts = [];
-  parts.push(`<span>Öntve <b>${s.poured}</b>${s.poured_planned ? `<small> / ${s.poured_planned} db</small>` : ' db'}</span>`);
-  if (s.demolded) parts.push(`<span>Kiforgatva <b>${s.demolded}</b> db</span>`);
-  if (s.installed_m) parts.push(`<span>Telepítve <b>${fmt(s.installed_m, 0)}</b> m</span>`);
-  parts.push(`<span>Munkások <b>${s.workers}</b> fő · ${fmt(s.hours, 1)} ó</span>`);
-  parts.push(`<span>Bér <b>${ft(s.cost)}</b></span>`);
-  if (s.per_man_hour !== null) parts.push(`<span>Panel/ember-óra <b>${fmt(s.per_man_hour, 1)}</b></span>`);
-
+  let body = '';
+  if (st !== 'plan') {
+    const stats = [`<span>Öntve <b>${s.poured}</b>${s.poured_planned ? `<small>/${s.poured_planned}</small>` : ''}</span>`];
+    if (s.demolded) stats.push(`<span>Kiforgatva <b>${s.demolded}</b></span>`);
+    if (s.installed_m) stats.push(`<span>Telepítve <b>${fmt(s.installed_m, 0)}</b><small>m</small></span>`);
+    stats.push(`<span>Munkás <b>${s.workers}</b><small>${fmt(s.hours, 1)} ó</small></span>`);
+    stats.push(`<span>Bér <b>${Math.round(s.cost / 1000) || 0}</b><small>e Ft</small></span>`);
+    if (s.per_man_hour !== null) stats.push(`<span>Db/óra <b>${fmt(s.per_man_hour, 1)}</b></span>`);
+    body = `${pct !== null ? `<div class="progress"><div class="progress-head"><span>Terv teljesítése · ${s.planned_done}/${s.planned_total} kész${s.planned_partial ? `, ${s.planned_partial} részben` : ''}</span><b>${pct}%</b></div>
+      <div class="bar big ${pct >= 100 ? 'done' : ''}"><i style="width:${pct}%"></i></div></div>` : ''}
+      <div class="hero-stats">${stats.join('')}</div>${timelineHtml(d)}`;
+  }
   $('#day-hero').className = `card hero hero-${st}`;
-  $('#day-hero').innerHTML = `
-    <ol class="stepper">${steps.map(([k, l], i) => `<li class="${i < idx ? 'done' : i === idx ? 'cur' : ''}">${l}</li>`).join('')}</ol>
-    <div class="hero-main">${main}</div>
-    ${pct !== null ? `<div class="progress"><div class="progress-head"><span>Terv teljesítése</span><b>${pct}%</b></div>
-      <div class="bar big ${pct >= 100 ? 'done' : ''}"><i style="width:${pct}%"></i></div>
-      <div class="muted small">${s.planned_done}/${s.planned_total} kész${s.planned_partial ? ` · ${s.planned_partial} részben` : ''}${s.planned_missed ? ` · ${s.planned_missed} nem` : ''}${s.unplanned ? ` · +${s.unplanned} plusz munka` : ''}</div></div>` : ''}
-    <div class="hero-stats">${parts.join('')}</div>
-    ${timelineHtml(d)}`;
+  $('#day-hero').innerHTML = `<div class="hero-main"><div class="hero-state">${head}</div>${action}</div>${body}`;
 }
 
 // Idővonal: a nap, a munkások jelenléte és az öntések, egy „most” jelzővel.
@@ -202,7 +200,8 @@ $('#day-hero').addEventListener('click', async (e) => {
     await api('/api/day/start', { method: 'POST', body: { date: d.day, at } });
     toast('A nap elindult'); loadDay();
   }
-  if (e.target.closest('#hero-close')) $('#close-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (e.target.closest('#hero-close')) openClose();
+  if (e.target.closest('#hero-reopen')) { await api('/api/day/reopen', { method: 'POST', body: { date: ns.data.day } }); loadDay(); }
 });
 
 function taskName(t) {
@@ -217,35 +216,41 @@ function renderTasks(d) {
   const planned = d.tasks.filter((t) => !t.unplanned), extra = d.tasks.filter((t) => t.unplanned);
   const block = (list) => list.map((t) => taskHtml(t, d)).join('');
   $('#tasks').innerHTML =
-    (planned.length ? block(planned) : '<p class="muted">Nincs tervezett feladat erre a napra.</p>') +
+    (planned.length ? block(planned) : `<p class="muted">Nincs tervezett feladat erre a napra.</p>`) +
     (extra.length ? `<h3>Plusz munka</h3>${block(extra)}` : '');
 }
 
 function taskHtml(t, d) {
-  const [stLabel, stCls] = STATUS[t.status];
   const unit = t.unit;
-  const qty = t.unplanned ? (t.done_qty === null ? '' : qtyText(t.done_qty, unit))
-    : t.done_qty !== null ? `${qtyText(t.done_qty, unit)} / ${qtyText(t.planned_qty, unit)}`
-    : t.planned_qty !== null ? `terv: ${qtyText(t.planned_qty, unit)}` : '';
-  const times = t.kind === 'ontes' && t.started_at
-    ? `${hhmm(t.started_at)}${t.ended_at ? ' – ' + hhmm(t.ended_at) : ' óta'}` : '';
   const finished = ['kesz', 'reszben', 'nem'].includes(t.status);
-  let actions = '';
-  if (t.status === 'terv' && t.kind === 'ontes') actions = `<button class="btn primary sm" data-start="${t.id}">Öntés indítása</button><button class="btn sm" data-finish="${t.id}">Lezárás</button>`;
-  else if (t.status === 'folyamatban') actions = `<button class="btn success sm" data-finish="${t.id}">Öntés lezárása</button>`;
-  else if (t.status === 'terv') actions = `<button class="btn primary sm" data-finish="${t.id}">Lezárás</button>`;
-  else actions = `<button class="btn sm" data-finish="${t.id}">Módosítás</button>`;
-  actions += `<button class="btn sm ghost" data-edit-task="${t.id}" aria-label="Szerkesztés">✎</button><button class="btn sm ghost" data-del-task="${t.id}" aria-label="Törlés">✕</button>`;
-  return `<div class="task st-${t.status}" data-task="${t.id}">
+  const edit = `<button class="btn sm ghost" data-edit-task="${t.id}" aria-label="Szerkesztés">✎</button><button class="btn sm ghost" data-del-task="${t.id}" aria-label="Törlés">✕</button>`;
+  if (dayState(d) === 'plan' && !finished && t.status !== 'folyamatban') {
+    return `<div class="task plan-row" data-task="${t.id}"><div class="task-main">
+      <div><b>${esc(taskName(t))}</b>${t.carried_from ? ' <span class="muted small">(áthozva)</span>' : ''}${t.note ? `<div class="muted small">${esc(t.note)}</div>` : ''}</div>
+      <span class="plan-qty">${t.planned_qty !== null ? qtyText(t.planned_qty, unit) : ''}</span>
+      <span class="row-btns">${edit}</span></div></div>`;
+  }
+  const qty = t.unplanned ? (t.done_qty === null ? '' : qtyText(t.done_qty, unit))
+    : t.done_qty !== null ? `${fmt(t.done_qty, 0)}/${qtyText(t.planned_qty, unit)}`
+    : t.planned_qty !== null ? qtyText(t.planned_qty, unit) : '';
+  const meta = [
+    t.kind === 'ontes' && t.started_at ? `${hhmm(t.started_at)}${t.ended_at ? '–' + hhmm(t.ended_at) : ' óta'}` : '',
+    t.run_id ? 'kötés indítva' : '',
+    t.reason && t.status !== 'kesz' ? `<span class="neg">${esc(t.reason)}</span>` : '',
+    t.carried_from ? 'áthozva' : '',
+    t.note ? esc(t.note) : '',
+  ].filter(Boolean).join(' · ');
+  let right;
+  if (t.status === 'terv' && t.kind === 'ontes') right = `<button class="btn primary sm" data-start="${t.id}">▶ Indítás</button>`;
+  else if (t.status === 'folyamatban') right = `<button class="btn success sm" data-finish="${t.id}">■ Lezárás</button>`;
+  else if (t.status === 'terv') right = `<button class="btn sm" data-finish="${t.id}">Lezárás</button>`;
+  else right = `<span class="badge ${STATUS[t.status][1]}">${STATUS[t.status][0]}</span>`;
+  return `<div class="task st-${t.status} ${ns.finishing === t.id ? 'open' : ''}" data-task="${t.id}">
     <div class="task-main">
-      <div><b>${esc(taskName(t))}</b>${t.carried_from ? ' <span class="muted small">(áthozva)</span>' : ''}
-        <div class="muted small">${[qty && `<span class="qty-txt">${qty}</span>`, times,
-          t.run_id ? `kötés: ${esc(t.run_name || '#' + t.run_id)}` : '',
-          t.reason && t.status !== 'kesz' ? `<span class="neg">${esc(t.reason)}</span>` : '',
-          t.note ? esc(t.note) : ''].filter(Boolean).join(' · ')}</div></div>
-      <span class="badge ${stCls}">${stLabel}</span>
+      <button class="task-text" type="button" data-finish="${t.id}"><b>${esc(taskName(t))}</b>${meta ? `<span class="muted small">${meta}</span>` : ''}</button>
+      <span class="plan-qty">${qty}</span>
+      ${right}
     </div>
-    <div class="row-btns wrap">${actions}</div>
     ${ns.finishing === t.id ? finishForm(t, d, finished) : ''}
   </div>`;
 }
@@ -276,7 +281,10 @@ function finishForm(t, d, finished) {
     ${isPour && t.run_id ? `<p class="muted small">Már hozzá van rendelve egy kötéshez (${esc(t.run_name || '#' + t.run_id)}).</p>` : ''}
     <div class="row-btns wrap"><button class="btn success" type="submit">Mentés</button>
       ${finished ? `<button class="btn" type="button" data-reopen-task="${t.id}">Vissza tervbe</button>` : ''}
-      <button class="btn" type="button" data-finish-cancel>Mégse</button></div>
+      <button class="btn" type="button" data-finish-cancel>Mégse</button>
+      <span class="spacer"></span>
+      <button class="btn sm ghost" type="button" data-edit-task="${t.id}">✎ Szerkesztés</button>
+      <button class="btn sm ghost" type="button" data-del-task="${t.id}">✕ Törlés</button></div>
   </form>`;
 }
 
@@ -403,7 +411,7 @@ function renderLogs(d) {
     </div>`).join('') || '<p class="muted">Még senki nincs rögzítve.</p>';
   const inside = new Set(d.logs.map((l) => l.worker_id));
   const rest = d.workers.filter((w) => !inside.has(w.id));
-  $('#quick-workers').innerHTML = rest.length
+  $('#quick-workers').innerHTML = d.closed_at ? '' : rest.length
     ? `<span class="muted small">${today ? 'Megérkezett (most):' : 'Hozzáad:'}</span>${rest.map((w) => `<button class="chip" data-arrive="${w.id}">+ ${esc(w.name)}</button>`).join('')}`
     : d.workers.length ? '' : '<p class="muted small">Még nincs munkás felvéve. Vedd fel a Munkások fülön.</p>';
 }
@@ -467,20 +475,29 @@ $('#log-form').addEventListener('submit', async (e) => {
   e.target.reset(); $('#log-details').open = false; toast('Rögzítve'); loadDay();
 });
 
-// --- Napzárás ---
+// --- Napzárás (felugró ablak) ---
+function openClose() {
+  const d = ns.data;
+  const open = d.tasks.filter((t) => t.status === 'terv');
+  const running = d.tasks.filter((t) => t.status === 'folyamatban');
+  const noLeave = d.logs.filter((l) => !l.end_time);
+  const warn = [];
+  if (running.length) warn.push(`Még fut: ${running.map((t) => esc(taskName(t))).join(', ')} – előbb zárd le.`);
+  if (noLeave.length) warn.push(`Nincs távozás: ${noLeave.map((l) => esc(l.worker_name)).join(', ')}.`);
+  if (open.length) warn.push(`${open.length} feladat nincs lezárva, ezek „nem készült el” állapotba kerülnek.`);
+  const s = d.summary;
+  $('#close-check').innerHTML = `<div class="kv"><span>Öntve: <b>${s.poured}${s.poured_planned ? ' / ' + s.poured_planned : ''} db</b></span>
+      <span>Terv: <b>${s.planned_done}/${s.planned_total} kész</b></span><span>Munkaóra: <b>${fmt(s.hours, 1)}</b></span><span>Bér: <b>${ft(s.cost)}</b></span></div>
+    ${warn.map((w) => `<p class="small ${w.startsWith('Még fut') || w.startsWith('Nincs') ? 'neg' : 'muted'}">${w}</p>`).join('')}`;
+  $('#day-note').value = d.note || '';
+  $('#close-dialog').showModal();
+}
+$('#close-cancel').addEventListener('click', () => $('#close-dialog').close());
 $('#day-close').addEventListener('click', async () => {
-  const s = ns.data.summary;
-  const open = ns.data.tasks.filter((t) => t.status === 'terv').length;
-  if (open && !confirm(`${open} feladat még nincs lezárva; ezek „nem készült el” állapotba kerülnek. Lezárod a napot?`)) return;
   const res = await api('/api/day/close', { method: 'POST', body: { date: ns.day, note: $('#day-note').value, carry: $('#day-carry').checked } });
-  toast(`Nap lezárva${res.carried ? ` · ${res.carried} feladat átkerült holnapra` : ''} · ${s.poured} db öntve`);
+  $('#close-dialog').close();
+  toast(`Nap lezárva${res.carried ? ` · ${res.carried} feladat átkerült a következő napra` : ''}`);
   loadDay(); window.scrollTo({ top: 0, behavior: 'smooth' });
-});
-$('#day-note-save').addEventListener('click', async () => {
-  await api('/api/day', { method: 'PATCH', body: { date: ns.day, note: $('#day-note').value } }); toast('Megjegyzés mentve');
-});
-$('#day-reopen').addEventListener('click', async () => {
-  await api('/api/day/reopen', { method: 'POST', body: { date: ns.day } }); loadDay();
 });
 
 // ===================================================================

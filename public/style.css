@@ -334,3 +334,27 @@ label > select:disabled { opacity: .6; }
 @media (max-width: 480px) { .mday { min-height: 58px; } .mline { font-size: .62rem; } }
 
 .dialog.narrow { width: min(560px, calc(100% - 24px)); }
+
+/* Összeszedett napi nézet */
+#day-body.single { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
+#view-day .hero { max-width: none; }
+#day-body.single, #view-day .hero.hero-plan { max-width: 760px; }
+.hero-main { margin-bottom: 0; }
+.hero .progress { margin-top: 14px; }
+.hero-stats { margin-top: 10px; }
+.hero-stats span { display: flex; flex-direction: column; align-items: flex-start; min-width: 76px; padding: 6px 12px; font-size: .75rem; }
+.hero-stats b { margin: 0; font-size: 1.3rem; line-height: 1.2; }
+.hero-stats b + small { font-size: .72rem; }
+.task.plan-row { padding: 8px 10px; }
+.task.plan-row .task-main { align-items: center; margin: 0; }
+.task.plan-row .task-main > div { flex: 1; }
+.plan-qty { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.task.plan-row .row-btns { gap: 2px; }
+.card-head .row-btns { flex-wrap: wrap; justify-content: flex-end; }
+.task .task-main { align-items: center; margin: 0; gap: 8px; }
+.task-text { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; background: none; border: 0; padding: 0; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.task-text .small { line-height: 1.3; }
+.task.open { background: var(--card); }
+.task .badge { font-size: .72rem; padding: 2px 8px; white-space: nowrap; }
+.task .btn.sm { white-space: nowrap; }
+.spacer { flex: 1; }

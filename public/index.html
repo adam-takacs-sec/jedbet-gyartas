@@ -96,22 +96,22 @@
       <div id="view-day">
         <div class="card hero" id="day-hero"></div>
 
-        <div class="grid2">
+        <div class="grid2" id="day-body">
           <div class="card">
-            <h2>Feladatok</h2>
+            <div class="card-head"><h2 id="tasks-title">Feladatok</h2>
+              <div class="row-btns" id="task-add-btns">
+                <button class="btn sm" type="button" data-add-task="extra" id="add-extra">+ Plusz munka</button>
+                <button class="btn primary sm" type="button" data-add-task="plan">+ Feladat</button>
+              </div></div>
             <div id="tasks"></div>
-            <div class="row-btns wrap" id="task-add-btns">
-              <button class="btn primary" type="button" data-add-task="plan">+ Tervezett feladat</button>
-              <button class="btn" type="button" data-add-task="extra">+ Plusz munka (utólag)</button>
-            </div>
           </div>
 
-          <div class="card">
-            <h2>Munkások aznap</h2>
+          <div class="card" id="workers-card">
+            <h2>Munkások</h2>
             <div id="logs" class="list"></div>
             <div id="quick-workers" class="chips"></div>
             <details class="sub" id="log-details">
-              <summary>Munkás rögzítése részletesen</summary>
+              <summary>Részletes rögzítés</summary>
               <form id="log-form">
                 <div class="row3">
                   <label>Munkás<select name="worker_id" id="lf-worker" required></select></label>
@@ -125,17 +125,6 @@
               </form>
               <p class="muted small">Új munkást a Munkások fülön tudsz felvenni.</p>
             </details>
-          </div>
-        </div>
-
-        <div class="card" id="close-card">
-          <h2>Napzárás</h2>
-          <label>Megjegyzés a naphoz<textarea id="day-note" rows="2" maxlength="2000" placeholder="pl. délután eső, a keverő akadozott"></textarea></label>
-          <label class="check"><input type="checkbox" id="day-carry" checked> Ami nem vagy csak részben lett kész, átkerül a következő napra</label>
-          <div class="row-btns wrap">
-            <button class="btn success" id="day-close" type="button">Nap lezárása</button>
-            <button class="btn" id="day-note-save" type="button">Csak a megjegyzés mentése</button>
-            <button class="btn" id="day-reopen" type="button" hidden>Újranyitás</button>
           </div>
         </div>
       </div>
@@ -157,6 +146,14 @@
         </div>
       </div>
     </section>
+
+    <dialog id="close-dialog" class="dialog narrow" aria-labelledby="close-title">
+      <div class="card-head"><h2 id="close-title">Napzárás</h2><button class="btn sm" type="button" id="close-cancel">Mégse</button></div>
+      <div id="close-check"></div>
+      <label>Megjegyzés a naphoz<textarea id="day-note" rows="3" maxlength="2000" placeholder="pl. délután eső, a keverő akadozott"></textarea></label>
+      <label class="check"><input type="checkbox" id="day-carry" checked> Ami nem vagy csak részben lett kész, átkerül a következő napra</label>
+      <button class="btn success big" id="day-close" type="button">Nap lezárása</button>
+    </dialog>
 
     <dialog id="task-dialog" class="dialog narrow" aria-labelledby="task-form-title">
       <form id="task-form">

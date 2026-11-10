@@ -560,3 +560,7 @@ label { font-weight: 600; }
 .pv-pop-h b { flex: 1; }
 .pv-x { background: none; border: 0; color: var(--muted); font-size: 1rem; cursor: pointer; }
 .pv-pop .btn.sm { min-height: 34px; }
+.vpill.add { background: var(--red); border-color: var(--red); color: #fff; padding: 4px 14px; font-size: 13px; font-weight: 800; pointer-events: auto; cursor: pointer; }
+[data-add-side] .fo { pointer-events: auto; }
+.plot-view.editing { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
+label .lbl { display: block; }

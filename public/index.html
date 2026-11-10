@@ -261,17 +261,6 @@
           <div id="stage-list"></div>
         </div>
 
-        <dialog id="plot-dialog" class="dialog narrow" aria-labelledby="plot-dialog-title">
-          <form id="plot-form">
-            <div class="card-head"><h2 id="plot-dialog-title">Telek megadása</h2><button class="btn sm" type="button" data-close-dialog>Mégse</button></div>
-            <p class="muted small">Indulásnak egy téglalap; utána a sarkokat húzhatod, és az oldalak hosszát pontosan beírhatod.</p>
-            <div class="form2">
-              <label>Utcafront (m)<input name="w" type="number" inputmode="decimal" step="any" min="1" required></label>
-              <label>Mélység (m)<input name="h" type="number" inputmode="decimal" step="any" min="1" required></label>
-            </div>
-            <button class="btn primary big" type="submit">Létrehozás</button>
-          </form>
-        </dialog>
 
         <div class="grid2">
           <div class="card">
@@ -306,10 +295,9 @@
         <div class="card-head"><h2 id="stage-dialog-title">Új szakasz</h2><button class="btn sm" type="button" data-close-dialog>Mégse</button></div>
         <div class="form2">
           <label class="full">Szakasz neve<input name="stage_name" required maxlength="120" placeholder="pl. Utcafront"></label>
-          <label class="full" data-for="side">Telek oldala (nem kötelező)<select name="side" id="stage-side"></select></label>
-          <label class="full" data-for="turn">Irány<select name="heading" id="stage-turn"></select></label>
-          <label data-for="from">Kezdés az oldal elejétől (m)<input name="from_m" type="number" inputmode="decimal" step="any" min="0" value="0"></label>
+          <label>Oldal<select name="side" id="stage-side"></select></label>
           <label>Hossz (m)<input name="length_m" type="number" inputmode="decimal" step="any" min="0.5" required></label>
+          <label data-for="from"><span class="lbl">Kezdés a saroktól (m)</span><input name="from_m" type="number" inputmode="decimal" step="any" min="0" value="0"></label>
           <label>Minta<select name="template" id="stage-template"></select></label>
           <label class="full">Megjegyzés<input name="note" maxlength="500"></label>
         </div>

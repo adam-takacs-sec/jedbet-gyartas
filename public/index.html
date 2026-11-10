@@ -158,14 +158,14 @@
     <dialog id="task-dialog" class="dialog narrow" aria-labelledby="task-form-title">
       <form id="task-form">
         <div class="card-head"><h2 id="task-form-title">Új feladat</h2><button class="btn sm" type="button" id="tf-cancel">Mégse</button></div>
-        <div class="row3">
+        <div class="form2">
           <label>Típus<select name="kind" id="tf-kind"></select></label>
           <label>Nap<input name="day" type="date" required></label>
           <label data-for="template">Minta<select name="template" id="tf-template"></select></label>
           <label data-for="job">Projekt<select name="job_id" id="tf-job"></select></label>
-          <label data-for="qty"><span id="tf-qty-label">Tervezett mennyiség</span><span class="qty"><button type="button" data-step="-1">−</button><input name="qty" type="number" inputmode="decimal" min="0" step="any"><button type="button" data-step="1">+</button></span></label>
-          <label class="span3" data-for="title">Megnevezés<input name="title" maxlength="120" placeholder="pl. Kavics lerakás, zsaluk javítása"></label>
-          <label class="span3">Megjegyzés<input name="note" maxlength="500"></label>
+          <label data-for="qty"><span id="tf-qty-label">Tervezett mennyiség</span><span class="qty"><button type="button" data-step="-1" aria-label="Kevesebb">−</button><input name="qty" type="number" inputmode="decimal" min="0" step="any"><button type="button" data-step="1" aria-label="Több">+</button></span></label>
+          <label class="full" data-for="title">Megnevezés<input name="title" maxlength="120" placeholder="pl. Kavics lerakás, zsaluk javítása"></label>
+          <label class="full">Megjegyzés<input name="note" maxlength="500"></label>
         </div>
         <button class="btn primary big" type="submit">Mentés</button>
       </form>

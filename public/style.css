@@ -168,7 +168,7 @@ form.sub { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 4px
 }
 .dialog::backdrop { background: rgba(0, 0, 0, .55); }
 .dialog .kv { margin-bottom: 12px; }
-.dialog select { min-height: 34px; padding: 2px 6px; font: inherit; color: var(--ink); background: var(--input); border: 1px solid var(--line); border-radius: 6px; }
+#pd-status { min-height: 34px; padding: 2px 6px; font: inherit; color: var(--ink); background: var(--input); border: 1px solid var(--line); border-radius: 6px; }
 .dialog .row-btns { flex-wrap: wrap; align-items: center; margin-top: 10px; }
 button.link { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 #pallet-table select { min-height: 34px; padding: 2px 6px; font: inherit; color: var(--ink); background: var(--input); border: 1px solid var(--line); border-radius: 6px; }
@@ -358,3 +358,32 @@ label > select:disabled { opacity: .6; }
 .task .badge { font-size: .72rem; padding: 2px 8px; white-space: nowrap; }
 .task .btn.sm { white-space: nowrap; }
 .spacer { flex: 1; }
+
+/* Egységes űrlapmezők (Safari is): azonos magasság, saját nyíl a legördülőn, nincs léptető */
+label > input, label > select, label > textarea, .qty { margin-top: 6px; }
+.qty input { margin: 0; }
+label > input, label > select, label > textarea { font-weight: 400; }
+label > input, label > select, .qty input, .qty button, .day-nav input[type="date"] { height: 46px; min-height: 46px; }
+label > select, .filters select, #pallet-table select {
+  -webkit-appearance: none; appearance: none; padding-right: 34px; line-height: 1.2;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%239a9da1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 8px;
+}
+label > input[type="date"], label > input[type="time"], .day-nav input[type="date"] {
+  -webkit-appearance: none; appearance: none; display: flex; align-items: center; text-align: left;
+}
+input::-webkit-date-and-time-value { text-align: left; }
+input[type="number"] { -moz-appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.qty { align-items: stretch; }
+.qty input { flex: 1 1 auto; min-width: 0; width: auto; font-weight: 700; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.qty button { flex: 0 0 52px; display: grid; place-items: center; padding: 0; }
+label { font-weight: 600; }
+
+/* Kétoszlopos űrlaprács (felugró ablakok) */
+.form2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; align-items: start; margin-bottom: 8px; }
+.form2 > label { margin-bottom: 10px; }
+.form2 > .full { grid-column: 1 / -1; }
+@media (max-width: 420px) { .form2 { grid-template-columns: minmax(0, 1fr); } }
+.dialog .card-head { margin-bottom: 14px; }
+.dialog .btn.big { margin-top: 4px; }

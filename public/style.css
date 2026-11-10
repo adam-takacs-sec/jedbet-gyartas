@@ -564,3 +564,6 @@ label { font-weight: 600; }
 [data-add-side] .fo { pointer-events: auto; }
 .plot-view.editing { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
 label .lbl { display: block; }
+.plot-view:not(.editing) svg.pv { touch-action: none; }
+.plot-view [data-el] { cursor: pointer; }
+.plot-view [data-el]:hover { fill: rgba(255,255,255,.08); }

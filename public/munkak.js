@@ -28,6 +28,23 @@ const daysLeft = (d) => (d ? Math.round((Date.parse(`${d}T12:00:00`) - Date.now(
 const m1 = (v) => fmt(v, Math.abs(v % 1) > 0.05 ? 1 : 0);
 const sideOf = (st) => (st.side !== null && st.side !== undefined && SIDES[st.side] ? SIDES[st.side] : null);
 
+// Elemenkénti készültség: oszlopok (spans + 1) és panelek (spans). Ha nincs elemenként jelölve,
+// a kész hosszból (napi lap / kézi) számoljuk: az elejétől folyamatosan.
+function stageMap(st) {
+  const n = Math.max(1, Math.ceil(st.length_m / 2 - 1e-9));
+  if (st.done_map && st.done_map.includes('|')) {
+    const [p, s] = st.done_map.split('|');
+    if (p.length === n + 1 && s.length === n) return { p: [...p].map((c) => c === '1'), s: [...s].map((c) => c === '1') };
+  }
+  const done = Math.min(st.done_m || 0, st.length_m);
+  return {
+    p: Array.from({ length: n + 1 }, (_, j) => done > 0 && Math.min(j * 2, st.length_m) <= done + 1e-6),
+    s: Array.from({ length: n }, (_, j) => Math.min(st.length_m, (j + 1) * 2) <= done + 1e-6),
+  };
+}
+const mapStr = (m) => `${m.p.map((b) => (b ? 1 : 0)).join('')}|${m.s.map((b) => (b ? 1 : 0)).join('')}`;
+const mapMeters = (st, m) => m.s.reduce((a, b, j) => a + (b ? Math.min(st.length_m, (j + 1) * 2) - j * 2 : 0), 0);
+
 // A négy oldal elrendezése: a téglalap szélessége az É/D, magassága a K/Ny oldal kerítéséhez igazodik.
 function frame(stages) {
   const end = [0, 0, 0, 0];
@@ -93,36 +110,34 @@ function fenceView(Wpx) {
     const px = (m) => m * k;
     const cls = js.sel && js.sel !== st.id ? 'dim' : js.sel === st.id ? 'sel' : '';
     let f = `<g data-stage-g="${st.id}" class="${cls}" transform="translate(${X(pl.a).toFixed(1)} ${Y(pl.a).toFixed(1)}) rotate(${rot})">`;
-    f += `<rect data-hit="${st.id}" x="0" y="-16" width="${px(L).toFixed(1)}" height="32" fill="transparent" style="cursor:pointer"/>`;
+    if (js.edit) f += `<rect data-hit="${st.id}" x="0" y="-16" width="${px(L).toFixed(1)}" height="32" fill="transparent" style="cursor:pointer"/>`;
+    const map = stageMap(st);
+    // Panelek: mindegyik külön kattintható (a láthatatlan sáv az egész oszlopközt lefedi).
     for (let j = 0; j < spans; j++) {
       const d0 = j * 2, d1 = Math.min(L, (j + 1) * 2);
       const x0 = px(d0) + S * 0.15, x1 = px(d1) - S * 0.15;
-      const ok = d1 <= done + 1e-6;
+      const ok = map.s[j];
       f += `<rect pointer-events="none" x="${x0.toFixed(1)}" y="${(-t / 2).toFixed(1)}" width="${Math.max(1, x1 - x0).toFixed(1)}" height="${t.toFixed(1)}" rx="1" fill="${ok ? RED : '#8d9299'}"/>`;
-      if (!ok && done > d0) f += `<rect pointer-events="none" x="${x0.toFixed(1)}" y="${(-t / 2).toFixed(1)}" width="${Math.max(0, px(done) - x0).toFixed(1)}" height="${t.toFixed(1)}" rx="1" fill="${RED}"/>`;
+      if (!js.edit) f += `<rect data-el="s:${j}" data-st="${st.id}" x="${(px(d0) + S / 2).toFixed(1)}" y="-14" width="${Math.max(2, px(d1) - px(d0) - S).toFixed(1)}" height="28" fill="transparent"/>`;
     }
     for (let j = 0; j <= spans; j++) {
       const d = Math.min(j * 2, L), isEnd = j === 0 || j === spans;
-      const ok = done > 0 && d <= done + 1e-6;
+      const ok = map.p[j];
       f += `<path pointer-events="none" transform="translate(${px(d).toFixed(1)} 0)" d="${postPath(S * (isEnd ? 1.1 : 1), { l: j > 0, r: j < spans })}" fill="${ok ? '#a51d1d' : '#d9dbde'}" stroke="${ok ? '#ff8a8a' : '#16181b'}" stroke-width="${ok ? .8 : 1}"/>`;
+      if (!js.edit) f += `<rect data-el="p:${j}" data-st="${st.id}" x="${(px(d) - S / 2 - 1).toFixed(1)}" y="-14" width="${(S + 2).toFixed(1)}" height="28" fill="transparent"/>`;
     }
-    // Húzható „idáig kész” jelölő (csak alapnézetben)
-    // A sarkokban több szakasz pöttye esne egy helyre, ezért 0-nál és a teljes hossznál kicsit beljebb rajzoljuk.
-    const kx = Math.min(Math.max(px(done), 18), px(L) - 18);
-    if (!js.edit) f += `<g data-knob="${st.id}" transform="translate(${kx.toFixed(1)} 0)" style="cursor:${pl.dy ? 'ns' : 'ew'}-resize"><circle r="13" fill="transparent"/>
-      <circle r="7.5" fill="${RED}" stroke="#fff" stroke-width="2.5"/></g>`;
     f += '</g>';
     g += f;
     // Címke: sorszám és méter (befelé, a kereten belül)
     const mid = [(pl.a[0] + pl.b[0]) / 2, (pl.a[1] + pl.b[1]) / 2];
     const st2 = done >= L - 1e-6 ? 'ok' : done > 0 ? 'part' : '';
     if (narrow) {
-      g += `<g pointer-events="none" transform="translate(${X(mid).toFixed(1)} ${Y(mid).toFixed(1)})"><circle r="10" fill="${st2 === 'ok' ? RED : '#2c3035'}" stroke="${st2 ? RED : '#fff'}" stroke-width="2"/>
+      g += `<g data-hit="${st.id}" style="cursor:pointer" transform="translate(${X(mid).toFixed(1)} ${Y(mid).toFixed(1)})"><circle r="10" fill="${st2 === 'ok' ? RED : '#2c3035'}" stroke="${st2 ? RED : '#fff'}" stroke-width="2"/>
         <text y="4" text-anchor="middle" font-size="11" font-weight="800" fill="#fff">${idx + 1}</text></g>`;
     } else {
       const txt = done > 0 && done < L ? `${m1(done)}/${m1(L)} m` : `${m1(L)} m`;
       const off = 14 + ext(pl, 34 + txt.length * 7.2);
-      g += pill(X(mid) - pl.nx * off, Y(mid) - pl.ny * off, `<i>${idx + 1}</i>${txt}`, `stage ${st2}`);
+      g += `<g data-hit="${st.id}" style="cursor:pointer">${pill(X(mid) - pl.nx * off, Y(mid) - pl.ny * off, `<i>${idx + 1}</i>${txt}`, `stage ${st2}`)}</g>`;
     }
   });
 
@@ -275,7 +290,7 @@ function renderFence() {
     box.innerHTML = fenceView(Math.max(300, box.clientWidth)) + popHtml();
     $('#plot-hint').textContent = js.edit
       ? 'Szerkesztés: „+” az adott oldalra tesz új szakaszt (É és D vízszintes, K és Ny függőleges). Koppints egy szakaszra a módosításhoz vagy törléshez.'
-      : 'Húzd a piros pöttyöt a kerítésen: idáig készült el (2 méterenként ugrik). Koppints egy szakaszra a gyors gombokért.';
+      : 'Koppints egy oszlopra vagy panelre: kész lesz (újra koppintva visszavált). Húzással egyszerre többet jelölhetsz. A szakasz sorszámára koppintva: Mind kész / Nincs kész.';
   }
   renderStageList();
 }
@@ -293,7 +308,7 @@ function popHtml() {
   const below = y < 170;
   const body = js.edit
     ? `<div class="row-btns wrap"><button class="btn sm" type="button" data-pop="edit">✎ Módosítás</button><button class="btn sm ghost" type="button" data-pop="del">✕ Törlés</button></div>`
-    : `<div class="small">Kész: <b>${m1(st.done_m)}</b> / ${m1(st.length_m)} m ${st.manual ? '<span class="chip-s">kézzel</span>' : '<span class="muted">(napi lapból)</span>'}</div>
+    : `<div class="small">Kész: <b>${m1(st.done_m)}</b> / ${m1(st.length_m)} m ${st.manual ? '<span class="chip-s">kézzel jelölve</span>' : '<span class="muted">(napi lapból)</span>'}</div>
        <div class="row-btns wrap"><button class="btn sm success" type="button" data-pop="all">✓ Mind kész</button><button class="btn sm" type="button" data-pop="zero">Nincs kész</button>
        ${st.manual ? `<button class="btn sm ghost" type="button" data-pop="auto">Napi lap szerint (${m1(st.done_auto)} m)</button>` : ''}</div>`;
   return `<div class="pv-pop ${below ? 'below' : ''}" style="left:${x}px;top:${below ? y + 24 : y - 24}px">
@@ -313,24 +328,40 @@ function alongStage(st, m) {
   return Math.max(0, Math.min(st.length_m, Math.round(d / 2) * 2));
 }
 
+// Oszlop / panel jelölése: koppintás átvált, húzásnál az első elem új állapotával fest végig.
 $('#plot-view').addEventListener('pointerdown', (e) => {
-  const svg = $('#plot-view svg');
-  const knob = e.target.closest('[data-knob]');
-  if (!svg || !knob || js.edit) return;
+  const el = e.target.closest('[data-el]');
+  if (!el || js.edit) return;
   e.preventDefault();
-  const st = js.detail.stages.find((x) => x.id === +knob.dataset.knob);
-  let cur = st.done_m;
-  const orig = st.done_m;
   const box = $('#plot-view');
-  const redraw = () => { st.done_m = cur; box.innerHTML = fenceView(Math.max(300, box.clientWidth)) + popHtml(); };
+  const maps = {};
+  const getMap = (id) => (maps[id] ||= stageMap(js.detail.stages.find((x) => x.id === id)));
+  const apply = (node) => {
+    const id = +node.dataset.st, [kind, j] = node.dataset.el.split(':');
+    const m = getMap(id);
+    if (m[kind][+j] === paint) return false;
+    m[kind][+j] = paint;
+    return true;
+  };
+  const first = getMap(+el.dataset.st);
+  const [k0, j0] = el.dataset.el.split(':');
+  const paint = !first[k0][+j0];
+  apply(el);
+  const redraw = () => {
+    for (const [id, m] of Object.entries(maps)) { const st = js.detail.stages.find((x) => x.id === +id); st.done_map = mapStr(m); st.done_m = mapMeters(st, m); }
+    box.innerHTML = fenceView(Math.max(300, box.clientWidth)) + popHtml();
+  };
+  redraw();
   box.setPointerCapture?.(e.pointerId);
-  const move = (ev) => { const v = alongStage(st, toMeters($('#plot-view svg'), ev)); if (v !== cur) { cur = v; redraw(); } };
+  const move = (ev) => {
+    const node = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('[data-el]');
+    if (node && apply(node)) redraw();
+  };
   const up = async () => {
     box.removeEventListener('pointermove', move); box.removeEventListener('pointerup', up); box.removeEventListener('pointercancel', up);
-    if (Math.abs(cur - orig) < 0.01) return;
-    await api(`/api/stages/${st.id}`, { method: 'PATCH', body: { done_manual: cur } });
-    toast(`${st.stage_name}: ${m1(cur)} m kész`);
-    loadJobs();
+    try {
+      for (const [id, m] of Object.entries(maps)) await api(`/api/stages/${id}`, { method: 'PATCH', body: { done_map: mapStr(m) }, quiet: false });
+    } finally { loadJobs(); }
   };
   box.addEventListener('pointermove', move); box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
 });
@@ -342,7 +373,7 @@ $('#plot-view').addEventListener('click', (e) => {
   if (add && js.edit) return openStage(null, +add.dataset.addSide);
   const pop = e.target.closest('[data-pop]');
   if (pop) return popAction(pop.dataset.pop);
-  if (e.target.closest('.pv-pop') || e.target.closest('[data-knob]')) return;
+  if (e.target.closest('.pv-pop') || e.target.closest('[data-el]')) return;
   const hit = e.target.closest('[data-hit]');
   js.sel = hit ? (js.sel === +hit.dataset.hit ? null : +hit.dataset.hit) : null;
   renderFence();
@@ -361,9 +392,11 @@ async function popAction(a) {
     if (!confirm(`Törlöd: ${st.stage_name}?`)) return;
     await api(`/api/stages/${st.id}`, { method: 'DELETE' }); js.sel = null; toast('Törölve'); return loadJobs();
   }
-  const v = a === 'all' ? st.length_m : a === 'zero' ? 0 : null;
-  await api(`/api/stages/${st.id}`, { method: 'PATCH', body: { done_manual: v } });
-  toast(v === null ? 'Napi lap szerint' : `${st.stage_name}: ${m1(v)} m kész`); loadJobs();
+  if (a === 'auto') { await api(`/api/stages/${st.id}`, { method: 'PATCH', body: { done_manual: null } }); toast('Napi lap szerint'); return loadJobs(); }
+  const m = stageMap(st), on = a === 'all';
+  m.p = m.p.map(() => on); m.s = m.s.map(() => on);
+  await api(`/api/stages/${st.id}`, { method: 'PATCH', body: { done_map: mapStr(m) } });
+  toast(on ? `${st.stage_name}: minden kész` : `${st.stage_name}: semmi sincs kész`); loadJobs();
 }
 
 // Szakaszlista a nézet alatt; módosítani csak szerkesztésben lehet.

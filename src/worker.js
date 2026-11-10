@@ -406,7 +406,7 @@ async function routeApi(request, env, url, user) {
     const [{ results }, { results: stages }, { results: sums }] = await db.batch([
       db.prepare(`SELECT j.*, (SELECT COALESCE(SUM(length_m),0) FROM job_stages WHERE job_id = j.id) AS total_m
        FROM jobs j ORDER BY (j.status = 'Aktív') DESC, j.id DESC`),
-      db.prepare('SELECT id, job_id, stage_name, length_m, template, turn, side, from_m, done_manual, heading, anchor_id, anchor_end FROM job_stages ORDER BY id'),
+      db.prepare('SELECT id, job_id, stage_name, length_m, template, turn, side, from_m, done_manual, heading, anchor_id, anchor_end, done_map FROM job_stages ORDER BY id'),
       db.prepare(`${DONE_SQL} GROUP BY job_id, stage_id`),
     ]);
     return json(results.map((j) => {
@@ -450,14 +450,23 @@ async function routeApi(request, env, url, user) {
     const cur = await db.prepare('SELECT * FROM job_stages WHERE id = ?').bind(+r[1]).first();
     if (!cur) notFound();
     const v = stageFields(b, cur);
+    if (b.done_map !== undefined) {
+      if (b.done_map === null) v.done_map = null;
+      else {
+        const n = spansOf(v.length_m);
+        if (typeof b.done_map !== 'string' || !new RegExp(`^[01]{${n + 1}}\\|[01]{${n}}$`).test(b.done_map)) bad('Hibás jelölés');
+        v.done_map = b.done_map;
+      }
+    } else v.done_map = cur.done_map && cur.length_m === v.length_m ? cur.done_map : null; // hosszváltozásnál a jelölés elévül
     if (b.done_manual !== undefined) {
       v.done_manual = b.done_manual === null || b.done_manual === '' ? null : num(b.done_manual, 'kész hossz', { min: 0, max: 5000 });
       if (v.done_manual !== null) v.done_manual = Math.min(v.done_manual, v.length_m);
     } else v.done_manual = cur.done_manual;
     if (v.anchor_id === cur.id) v.anchor_id = null;
+    if (b.done_manual !== undefined && b.done_map === undefined) v.done_map = null; // kézi hossz vagy napi lap: a jelölés törlődik
     await db.prepare(`UPDATE job_stages SET stage_name = ?, length_m = ?, template = ?, note = ?, turn = ?, side = ?, from_m = ?, done_manual = ?,
-      heading = ?, anchor_id = ?, anchor_end = ? WHERE id = ?`).bind(v.stage_name, v.length_m, v.template, v.note, v.turn, v.side, v.from_m,
-      v.done_manual, v.heading, v.anchor_id, v.anchor_end, cur.id).run();
+      heading = ?, anchor_id = ?, anchor_end = ?, done_map = ? WHERE id = ?`).bind(v.stage_name, v.length_m, v.template, v.note, v.turn, v.side, v.from_m,
+      v.done_manual, v.heading, v.anchor_id, v.anchor_end, v.done_map, cur.id).run();
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/stages\/(\d+)$/)) && m === 'DELETE') {
@@ -589,10 +598,21 @@ function allocateDone(stages, sums) {
     let d = Math.min(st.length_m, by[st.id] || 0);
     const add = Math.min(st.length_m - d, free);
     d += add; free -= add;
-    const manual = st.done_manual !== null && st.done_manual !== undefined;
-    return { ...st, done_auto: d, done_m: manual ? Math.min(st.done_manual, st.length_m) : d, manual };
+    const mapped = mapMeters(st.done_map, st.length_m);
+    const manual = mapped !== null || (st.done_manual !== null && st.done_manual !== undefined);
+    return { ...st, done_auto: d, done_m: mapped !== null ? mapped : manual ? Math.min(st.done_manual, st.length_m) : d, manual };
   });
 }
+
+// Elemenkénti jelölésből a kész hossz: a kész panelek oszlopközeinek összege (az utolsó köz lehet rövidebb).
+function mapMeters(map, L) {
+  if (!map || typeof map !== 'string' || !map.includes('|')) return null;
+  const panels = map.split('|')[1];
+  let m = 0;
+  for (let j = 0; j < panels.length; j++) if (panels[j] === '1') m += Math.max(0, Math.min(L, (j + 1) * 2) - j * 2);
+  return m;
+}
+const spansOf = (L) => Math.max(1, Math.ceil(L / 2 - 1e-9));
 
 function parsePlot(s) { try { return s ? JSON.parse(s) : null; } catch { return null; } }
 // Telek: { unit: 'm', points: [[x, y], …] } méterben (3–60 pont); a régi formátum [lat, lng] pontokkal is elfogadott.

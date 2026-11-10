@@ -77,78 +77,102 @@
 
     <!-- NAPI LAP -->
     <section id="tab-nap" class="tab">
-      <div class="day-nav">
-        <button class="btn" id="day-prev" type="button" aria-label="Előző nap">◀</button>
-        <input type="date" id="day-date" aria-label="Nap">
-        <button class="btn" id="day-next" type="button" aria-label="Következő nap">▶</button>
-        <button class="btn sm" id="day-today" type="button">Ma</button>
-        <span id="day-title" class="day-title"></span>
-        <span id="day-badge"></span>
+      <div class="plan-bar">
+        <div class="seg" role="group" aria-label="Nézet">
+          <button type="button" data-view="day">Nap</button>
+          <button type="button" data-view="week">Hét</button>
+          <button type="button" data-view="month">Hónap</button>
+        </div>
+        <div class="day-nav">
+          <button class="btn" id="nav-prev" type="button" aria-label="Előző">◀</button>
+          <input type="date" id="day-date" aria-label="Dátum">
+          <button class="btn" id="nav-next" type="button" aria-label="Következő">▶</button>
+          <button class="btn sm" id="nav-today" type="button">Ma</button>
+        </div>
+        <span id="plan-title" class="plan-title"></span>
       </div>
 
-      <div class="card"><div id="day-summary" class="kv big"></div></div>
+      <!-- NAP -->
+      <div id="view-day">
+        <div class="card hero" id="day-hero"></div>
 
-      <div class="grid2">
-        <div class="card">
-          <h2>Feladatok</h2>
-          <div id="tasks"></div>
-          <form id="task-form" class="sub" hidden>
-            <h3 id="task-form-title">Új feladat</h3>
-            <div class="row3">
-              <label>Típus<select name="kind" id="tf-kind"></select></label>
-              <label data-for="template">Minta<select name="template" id="tf-template"></select></label>
-              <label data-for="job">Projekt<select name="job_id" id="tf-job"></select></label>
-              <label data-for="qty"><span id="tf-qty-label">Tervezett mennyiség</span><span class="qty"><button type="button" data-step="-1">−</button><input name="qty" type="number" inputmode="decimal" min="0" step="any"><button type="button" data-step="1">+</button></span></label>
-              <label class="span3" data-for="title">Megnevezés<input name="title" maxlength="120" placeholder="pl. Kavics lerakás, zsaluk javítása"></label>
-              <label class="span3">Megjegyzés<input name="note" maxlength="500"></label>
+        <div class="grid2">
+          <div class="card">
+            <h2>Feladatok</h2>
+            <div id="tasks"></div>
+            <div class="row-btns wrap" id="task-add-btns">
+              <button class="btn primary" type="button" data-add-task="plan">+ Tervezett feladat</button>
+              <button class="btn" type="button" data-add-task="extra">+ Plusz munka (utólag)</button>
             </div>
-            <div class="row-btns"><button class="btn primary" type="submit">Mentés</button><button class="btn" type="button" id="tf-cancel">Mégse</button></div>
-          </form>
-          <div class="row-btns wrap" id="task-add-btns">
-            <button class="btn primary" type="button" data-add-task="plan">+ Tervezett feladat</button>
-            <button class="btn" type="button" data-add-task="extra">+ Plusz munka (utólag)</button>
+          </div>
+
+          <div class="card">
+            <h2>Munkások aznap</h2>
+            <div id="logs" class="list"></div>
+            <div id="quick-workers" class="chips"></div>
+            <details class="sub" id="log-details">
+              <summary>Munkás rögzítése részletesen</summary>
+              <form id="log-form">
+                <div class="row3">
+                  <label>Munkás<select name="worker_id" id="lf-worker" required></select></label>
+                  <label>Munka<select name="kind" id="lf-kind"></select></label>
+                  <label data-for="job">Projekt<select name="job_id" id="lf-job"></select></label>
+                  <label>Érkezés<input name="start_time" type="time"></label>
+                  <label>Távozás<input name="end_time" type="time"></label>
+                  <label>Szünet (perc)<input name="break_min" type="number" min="0" step="5" value="0"></label>
+                </div>
+                <button class="btn primary" type="submit">Rögzítés</button>
+              </form>
+              <p class="muted small">Új munkást a Munkások fülön tudsz felvenni.</p>
+            </details>
           </div>
         </div>
 
-        <div class="card">
-          <h2>Munkások aznap</h2>
-          <div id="logs" class="list"></div>
-          <div id="quick-workers" class="chips"></div>
-          <details class="sub" id="log-details">
-            <summary>Munkás rögzítése részletesen</summary>
-            <form id="log-form">
-              <div class="row3">
-                <label>Munkás<select name="worker_id" id="lf-worker" required></select></label>
-                <label>Munka<select name="kind" id="lf-kind"></select></label>
-                <label data-for="job">Projekt<select name="job_id" id="lf-job"></select></label>
-                <label>Érkezés<input name="start_time" type="time"></label>
-                <label>Távozás<input name="end_time" type="time"></label>
-                <label>Szünet (perc)<input name="break_min" type="number" min="0" step="5" value="0"></label>
-              </div>
-              <button class="btn primary" type="submit">Rögzítés</button>
-            </form>
-            <p class="muted small">Új munkást a Munkások fülön tudsz felvenni.</p>
-          </details>
+        <div class="card" id="close-card">
+          <h2>Napzárás</h2>
+          <label>Megjegyzés a naphoz<textarea id="day-note" rows="2" maxlength="2000" placeholder="pl. délután eső, a keverő akadozott"></textarea></label>
+          <label class="check"><input type="checkbox" id="day-carry" checked> Ami nem vagy csak részben lett kész, átkerül a következő napra</label>
+          <div class="row-btns wrap">
+            <button class="btn success" id="day-close" type="button">Nap lezárása</button>
+            <button class="btn" id="day-note-save" type="button">Csak a megjegyzés mentése</button>
+            <button class="btn" id="day-reopen" type="button" hidden>Újranyitás</button>
+          </div>
         </div>
       </div>
 
-      <div class="card" id="close-card">
-        <h2>Napzárás</h2>
-        <label>Megjegyzés a naphoz<textarea id="day-note" rows="2" maxlength="2000" placeholder="pl. délután eső, a keverő akadozott"></textarea></label>
-        <label class="check"><input type="checkbox" id="day-carry" checked> Ami nem vagy csak részben lett kész, átkerül a következő napra</label>
-        <div class="row-btns wrap">
-          <button class="btn success" id="day-close" type="button">Nap lezárása</button>
-          <button class="btn" id="day-note-save" type="button">Csak a megjegyzés mentése</button>
-          <button class="btn" id="day-reopen" type="button" hidden>Újranyitás</button>
-        </div>
+      <!-- HÉT -->
+      <div id="view-week" hidden>
+        <div class="card"><div id="week-summary" class="kv big"></div></div>
+        <div id="week" class="week"></div>
+        <p class="muted small">Gépen a feladatot át lehet húzni másik napra. Telefonon a feladat szerkesztésénél állítsd át a napot.</p>
       </div>
 
-      <div class="card">
-        <h2>Előző napok</h2>
-        <div class="table-wrap"><table id="days-table"><thead><tr><th>Nap</th><th class="num">Terv kész</th><th class="num">Öntve</th><th class="num">Kiforg.</th><th class="num">Telep. (m)</th><th class="num">Óra</th><th class="num">Bér</th><th class="num">Db/óra</th><th></th></tr></thead><tbody></tbody></table></div>
-        <p class="muted small">Db/óra: öntött panel osztva a gyártásban töltött munkaórákkal.</p>
+      <!-- HÓNAP -->
+      <div id="view-month" hidden>
+        <div class="card"><div id="month-summary" class="kv big"></div></div>
+        <div class="card month-card">
+          <div class="month-head"><span>H</span><span>K</span><span>Sze</span><span>Cs</span><span>P</span><span>Szo</span><span>V</span></div>
+          <div id="month" class="month"></div>
+          <div class="legend small muted"><span><i class="lg done"></i>minden kész</span><span><i class="lg part"></i>részben</span><span><i class="lg miss"></i>elmaradt</span><span><i class="lg plan"></i>tervezett</span><span>szám: öntött / tervezett darab</span></div>
+        </div>
       </div>
     </section>
+
+    <dialog id="task-dialog" class="dialog narrow" aria-labelledby="task-form-title">
+      <form id="task-form">
+        <div class="card-head"><h2 id="task-form-title">Új feladat</h2><button class="btn sm" type="button" id="tf-cancel">Mégse</button></div>
+        <div class="row3">
+          <label>Típus<select name="kind" id="tf-kind"></select></label>
+          <label>Nap<input name="day" type="date" required></label>
+          <label data-for="template">Minta<select name="template" id="tf-template"></select></label>
+          <label data-for="job">Projekt<select name="job_id" id="tf-job"></select></label>
+          <label data-for="qty"><span id="tf-qty-label">Tervezett mennyiség</span><span class="qty"><button type="button" data-step="-1">−</button><input name="qty" type="number" inputmode="decimal" min="0" step="any"><button type="button" data-step="1">+</button></span></label>
+          <label class="span3" data-for="title">Megnevezés<input name="title" maxlength="120" placeholder="pl. Kavics lerakás, zsaluk javítása"></label>
+          <label class="span3">Megjegyzés<input name="note" maxlength="500"></label>
+        </div>
+        <button class="btn primary big" type="submit">Mentés</button>
+      </form>
+    </dialog>
 
     <!-- KÖTÉS -->
     <section id="tab-erleles" class="tab" hidden>

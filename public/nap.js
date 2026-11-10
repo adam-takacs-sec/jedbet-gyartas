@@ -1,69 +1,209 @@
-// Napi lap (terv → öntés → napzárás) és Munkások fül.
+// Napi lap (nap / hét / hónap nézet) és Munkások fül.
 import { $, $$, esc, fmt, ft, hhmm, api, toast } from './lib.js';
 
 const ns = {
-  cfg: null, templates: [], day: null, data: null,
+  cfg: null, templates: [], day: null, data: null, view: 'day',
   finishing: null,   // feladat id, aminek a lezáró űrlapja nyitva van
   editingLog: null,  // munkanapló id, ami szerkesztés alatt van
   taskMode: null,    // 'plan' | 'extra' | {edit: id}
+  taskSource: null,  // a szerkesztett feladat adatai (hét/hónap nézetből is)
+  jobs: [], plan: null,
   worker: null, showInactive: false,
 };
+try { ns.view = localStorage.getItem('napView') || 'day'; } catch {}
 
 const STATUS = {
   terv: ['Terv', 'plan'], folyamatban: ['Folyamatban', 'wait'], kesz: ['Kész', 'ready'],
   reszben: ['Részben', 'hideg'], nem: ['Nem készült el', 'fagy'],
 };
 const WEEKDAYS = ['vasárnap', 'hétfő', 'kedd', 'szerda', 'csütörtök', 'péntek', 'szombat'];
-const weekday = (d) => WEEKDAYS[new Date(`${d}T12:00:00`).getDay()];
+const WD_SHORT = ['V', 'H', 'K', 'Sze', 'Cs', 'P', 'Szo'];
+const MONTHS = ['január', 'február', 'március', 'április', 'május', 'június', 'július', 'augusztus', 'szeptember', 'október', 'november', 'december'];
+const dow = (d) => new Date(`${d}T12:00:00Z`).getUTCDay();
+const weekday = (d) => WEEKDAYS[dow(d)];
 const shiftDay = (d, n) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const shiftMonth = (d, n) => { const x = new Date(`${d.slice(0, 7)}-01T12:00:00Z`); x.setUTCMonth(x.getUTCMonth() + n); return x.toISOString().slice(0, 10); };
+const monday = (d) => shiftDay(d, -((dow(d) + 6) % 7));
+const monthEnd = (d) => shiftDay(shiftMonth(d, 1), -1);
+const dm = (d) => `${+d.slice(5, 7)}.${+d.slice(8, 10)}.`;
 const nowHHMM = () => new Date().toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit', hour12: false });
 const toIso = (day, time) => (time ? new Date(`${day}T${time}`).toISOString() : null);
+const toMin = (t) => (t ? +t.slice(0, 2) * 60 + +t.slice(3, 5) : null);
+const isoMin = (iso) => (iso ? toMin(hhmm(iso)) : null);
 const opts = (list, sel, empty) => (empty !== undefined ? `<option value="">${esc(empty)}</option>` : '') +
   list.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(sel ?? '') ? 'selected' : ''}>${esc(l)}</option>`).join('');
 const qtyText = (v, unit) => (v === null || v === undefined ? '–' : `${fmt(v, Number.isInteger(+v) ? 0 : 1)}${unit ? ' ' + unit : ''}`);
+const dur = (min) => { min = Math.max(0, Math.round(min)); return `${Math.floor(min / 60)} ó ${String(min % 60).padStart(2, '0')} p`; };
+
+// A tervezett feladatok teljesítése 0–1 között: kész = 1, részben/folyamatban = elkészült / terv.
+function completion(tasks) {
+  const planned = tasks.filter((t) => !t.unplanned);
+  if (!planned.length) return null;
+  const score = planned.reduce((a, t) => {
+    if (t.status === 'kesz') return a + 1;
+    if ((t.status === 'reszben' || t.status === 'folyamatban') && t.planned_qty) return a + Math.min(1, (t.done_qty || 0) / t.planned_qty);
+    return a;
+  }, 0);
+  return score / planned.length;
+}
 
 export async function initNap(config) {
   ns.templates = config.templates;
   ns.cfg = await api('/api/nap/config');
   ns.day = ns.cfg.today;
   $('#tf-kind').innerHTML = opts(Object.entries(ns.cfg.kinds).map(([k, v]) => [k, v.label]));
-  $('#tf-template').innerHTML = opts(ns.templates.map((t) => [t, t]));
   $('#lf-kind').innerHTML = opts(Object.entries(ns.cfg.workKinds));
   $$('.pay-type').forEach((s) => (s.innerHTML = opts(Object.entries(ns.cfg.payTypes), 'ora')));
+  // Futó napnál az óra és az idővonal percenként frissül.
+  setInterval(() => {
+    if (ns.view === 'day' && ns.data && !$('#tab-nap').hidden && !document.hidden && ns.data.started_at && !ns.data.closed_at) renderHero(ns.data);
+  }, 30000);
 }
 
 // ===================================================================
-// Napi lap
+// Nézetváltás és lapozás
 // ===================================================================
-export async function loadNap() {
+export function loadNap() {
+  $$('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === ns.view)));
+  $('#view-day').hidden = ns.view !== 'day';
+  $('#view-week').hidden = ns.view !== 'week';
+  $('#view-month').hidden = ns.view !== 'month';
+  $('#day-date').value = ns.day;
+  return ns.view === 'week' ? loadWeek() : ns.view === 'month' ? loadMonth() : loadDay();
+}
+function setView(v, day) {
+  ns.view = v;
+  if (day) ns.day = day;
+  try { localStorage.setItem('napView', v); } catch {}
+  ns.finishing = null; ns.editingLog = null;
+  loadNap();
+}
+$$('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+const step = (n) => (ns.view === 'week' ? shiftDay(ns.day, 7 * n) : ns.view === 'month' ? shiftMonth(ns.day, n) : shiftDay(ns.day, n));
+$('#nav-prev').addEventListener('click', () => setView(ns.view, step(-1)));
+$('#nav-next').addEventListener('click', () => setView(ns.view, step(1)));
+$('#nav-today').addEventListener('click', () => setView(ns.view, ns.cfg.today));
+$('#day-date').addEventListener('change', (e) => e.target.value && setView(ns.view, e.target.value));
+const reload = () => loadNap();
+
+// ===================================================================
+// Nap
+// ===================================================================
+async function loadDay() {
   const d = await api(`/api/day?date=${ns.day}`);
-  ns.data = d;
-  $('#day-date').value = d.day;
-  $('#day-title').textContent = `${weekday(d.day)}${d.day === d.today ? ' · ma' : ''}`;
-  $('#day-badge').innerHTML = d.closed_at ? '<span class="badge ended">Lezárva</span>' : '';
-  renderSummary(d);
+  ns.data = d; ns.jobs = d.jobs;
+  $('#plan-title').textContent = `${d.day.slice(0, 4)}. ${MONTHS[+d.day.slice(5, 7) - 1]} ${+d.day.slice(8)}., ${weekday(d.day)}${d.day === d.today ? ' · ma' : ''}`;
+  renderHero(d);
   renderTasks(d);
   renderLogs(d);
   $('#day-note').value = d.note || '';
   $('#day-close').textContent = d.closed_at ? 'Újra lezárás' : 'Nap lezárása';
   $('#day-reopen').hidden = !d.closed_at;
-  $('#tf-job').innerHTML = opts(d.jobs.map((j) => [j.id, j.name]), null, '—');
   $('#lf-job').innerHTML = opts(d.jobs.map((j) => [j.id, j.name]), null, '—');
   $('#lf-worker').innerHTML = opts(d.workers.map((w) => [w.id, w.name]), null, 'Válassz…');
-  loadDays();
 }
 
-function renderSummary({ summary: s }) {
-  const parts = [];
-  parts.push(`<span>Öntve: <b>${s.poured} db</b>${s.poured_planned ? ` <span class="muted">/ ${s.poured_planned} terv</span>` : ''}</span>`);
-  if (s.demolded) parts.push(`<span>Kiforgatva: <b>${s.demolded} db</b></span>`);
-  if (s.installed_m) parts.push(`<span>Telepítve: <b>${fmt(s.installed_m, 0)} m</b></span>`);
-  parts.push(`<span>Terv: <b>${s.planned_done}/${s.planned_total} kész</b>${s.planned_partial ? ` · ${s.planned_partial} részben` : ''}${s.planned_missed ? ` · <span class="neg">${s.planned_missed} nem</span>` : ''}${s.unplanned ? ` · +${s.unplanned} plusz` : ''}</span>`);
-  parts.push(`<span>Munkások: <b>${s.workers} fő · ${fmt(s.hours, 1)} óra</b></span>`);
-  parts.push(`<span>Bér: <b>${ft(s.cost)}</b></span>`);
-  if (s.per_man_hour !== null) parts.push(`<span>Panel / ember-óra: <b>${fmt(s.per_man_hour, 1)}</b></span>`);
-  $('#day-summary').innerHTML = parts.join('');
+function dayState(d) {
+  if (d.closed_at) return 'closed';
+  if (d.started_at) return 'running';
+  return 'plan';
 }
+
+function renderHero(d) {
+  const st = dayState(d);
+  const s = d.summary;
+  const isToday = d.day === d.today;
+  const c = completion(d.tasks);
+  const pct = c === null ? null : Math.round(c * 100);
+  const steps = [['plan', 'Terv'], ['running', 'Folyamatban'], ['closed', 'Lezárva']];
+  const idx = steps.findIndex(([k]) => k === st);
+  const startMin = isoMin(d.started_at);
+  const nowMin = toMin(nowHHMM());
+  let main;
+  if (st === 'plan') {
+    const planned = d.tasks.filter((t) => !t.unplanned).length;
+    main = `<div class="hero-state"><div class="hero-big">${planned ? `${planned} feladat a tervben` : 'Még nincs terv'}</div>
+        <div class="muted">${s.poured_planned ? `Öntés terve: ${s.poured_planned} db` : 'Vegyél fel feladatokat, aztán indítsd a napot.'}</div></div>
+      ${isToday || d.day < d.today ? `<button class="btn primary hero-btn" id="hero-start" type="button">▶ Nap indítása</button>` : ''}`;
+  } else if (st === 'running') {
+    const elapsed = isToday && startMin !== null ? dur(nowMin - startMin) : '';
+    main = `<div class="hero-state"><div class="hero-big"><span class="pulse"></span>Fut a nap</div>
+        <div class="muted">Indult ${hhmm(d.started_at)}${elapsed ? ` · <b class="clock">${elapsed}</b>` : ''}</div></div>
+      <button class="btn success hero-btn" id="hero-close" type="button">■ Napzárás</button>`;
+  } else {
+    const len = startMin !== null ? dur(isoMin(d.closed_at) - startMin) : '';
+    main = `<div class="hero-state"><div class="hero-big">✓ Lezárva</div>
+        <div class="muted">${d.started_at ? `${hhmm(d.started_at)} – ` : ''}${hhmm(d.closed_at)}${len && d.closed_at.slice(0, 10) <= d.day ? ` · ${len}` : ''}</div></div>`;
+  }
+  const parts = [];
+  parts.push(`<span>Öntve <b>${s.poured}</b>${s.poured_planned ? `<small> / ${s.poured_planned} db</small>` : ' db'}</span>`);
+  if (s.demolded) parts.push(`<span>Kiforgatva <b>${s.demolded}</b> db</span>`);
+  if (s.installed_m) parts.push(`<span>Telepítve <b>${fmt(s.installed_m, 0)}</b> m</span>`);
+  parts.push(`<span>Munkások <b>${s.workers}</b> fő · ${fmt(s.hours, 1)} ó</span>`);
+  parts.push(`<span>Bér <b>${ft(s.cost)}</b></span>`);
+  if (s.per_man_hour !== null) parts.push(`<span>Panel/ember-óra <b>${fmt(s.per_man_hour, 1)}</b></span>`);
+
+  $('#day-hero').className = `card hero hero-${st}`;
+  $('#day-hero').innerHTML = `
+    <ol class="stepper">${steps.map(([k, l], i) => `<li class="${i < idx ? 'done' : i === idx ? 'cur' : ''}">${l}</li>`).join('')}</ol>
+    <div class="hero-main">${main}</div>
+    ${pct !== null ? `<div class="progress"><div class="progress-head"><span>Terv teljesítése</span><b>${pct}%</b></div>
+      <div class="bar big ${pct >= 100 ? 'done' : ''}"><i style="width:${pct}%"></i></div>
+      <div class="muted small">${s.planned_done}/${s.planned_total} kész${s.planned_partial ? ` · ${s.planned_partial} részben` : ''}${s.planned_missed ? ` · ${s.planned_missed} nem` : ''}${s.unplanned ? ` · +${s.unplanned} plusz munka` : ''}</div></div>` : ''}
+    <div class="hero-stats">${parts.join('')}</div>
+    ${timelineHtml(d)}`;
+}
+
+// Idővonal: a nap, a munkások jelenléte és az öntések, egy „most” jelzővel.
+function timelineHtml(d) {
+  const isToday = d.day === d.today;
+  const now = isToday ? toMin(nowHHMM()) : null;
+  const rows = [];
+  const dayEnd = d.closed_at ? (d.closed_at.slice(0, 10) > d.day ? 24 * 60 : isoMin(d.closed_at)) : now;
+  if (d.started_at) rows.push({ label: 'Nap', cls: 'tl-day', from: isoMin(d.started_at), to: dayEnd, open: !d.closed_at });
+  for (const l of d.logs) {
+    const to = toMin(l.end_time) ?? now;
+    rows.push({ label: l.worker_name, cls: l.kind === 'telepites' ? 'tl-install' : 'tl-worker', from: toMin(l.start_time), to, open: !l.end_time,
+      title: `${l.start_time || '?'}–${l.end_time || 'most'}` });
+  }
+  for (const t of d.tasks.filter((x) => x.kind === 'ontes' && x.started_at)) {
+    rows.push({ label: `Öntés ${t.template}`, cls: 'tl-pour', from: isoMin(t.started_at), to: t.ended_at ? isoMin(t.ended_at) : now,
+      open: !t.ended_at, title: `${t.done_qty ?? '…'} db` });
+  }
+  // A még futó sáv legalább néhány perces, hogy indításkor is látszódjon.
+  for (const r of rows) if (r.open && r.from !== null && (r.to === null || r.to - r.from < 5)) r.to = r.from + 5;
+  const valid = rows.filter((r) => r.from !== null && r.to !== null && r.to > r.from);
+  if (!valid.length) {
+    return d.started_at || d.logs.length ? '' : '<p class="muted small tl-empty">Az idővonal a nap indításával és a munkások érkezésével telik meg.</p>';
+  }
+  let lo = Math.min(6 * 60, ...valid.map((r) => r.from));
+  let hi = Math.max(17 * 60, ...valid.map((r) => r.to), now ?? 0);
+  lo = Math.floor(lo / 60) * 60; hi = Math.min(24 * 60, Math.ceil(hi / 60) * 60);
+  const pos = (m) => ((m - lo) / (hi - lo)) * 100;
+  const ticks = [];
+  for (let h = lo / 60; h <= hi / 60; h++) ticks.push(`<span class="tl-tick" style="left:${pos(h * 60)}%">${h}</span>`);
+  return `<div class="timeline">
+    <div class="tl-axis">${ticks.join('')}</div>
+    ${valid.map((r) => `<div class="tl-row"><span class="tl-label">${esc(r.label)}</span><div class="tl-track">
+      <i class="tl-bar ${r.cls} ${r.open ? 'open' : ''}" style="left:${pos(r.from)}%;width:${pos(r.to) - pos(r.from)}%" title="${esc(r.title || '')}"></i></div></div>`).join('')}
+    ${now !== null && now >= lo && now <= hi ? `<div class="tl-now" style="--x:${pos(now)}"><span>${nowHHMM()}</span></div>` : ''}
+  </div>`;
+}
+
+$('#day-hero').addEventListener('click', async (e) => {
+  if (e.target.closest('#hero-start')) {
+    const d = ns.data;
+    let at = null;
+    if (d.day !== d.today) {
+      const t = prompt('Mikor indult a nap? (ÓÓ:PP)', '07:00');
+      if (!t) return;
+      at = toIso(d.day, t);
+    }
+    await api('/api/day/start', { method: 'POST', body: { date: d.day, at } });
+    toast('A nap elindult'); loadDay();
+  }
+  if (e.target.closest('#hero-close')) $('#close-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
 
 function taskName(t) {
   const k = ns.cfg.kinds[t.kind].label;
@@ -145,8 +285,16 @@ $('#tasks').addEventListener('click', async (e) => {
   if (!b) return;
   const d = b.dataset;
   if (d.start) {
-    await api(`/api/tasks/${d.start}/start`, { method: 'POST', body: ns.day === ns.data.today ? {} : { at: toIso(ns.day, prompt('Öntés kezdete (ÓÓ:PP):', '07:00') || '07:00') } });
-    toast('Öntés elindítva'); loadNap();
+    let body = {};
+    if (ns.day !== ns.data.today) {
+      const t = prompt('Öntés kezdete (ÓÓ:PP):', '07:00');
+      if (!t) return;
+      body = { at: toIso(ns.day, t) };
+    }
+    await api(`/api/tasks/${d.start}/start`, { method: 'POST', body });
+    // Az első öntés magától elindítja a napot is.
+    if (!ns.data.started_at && ns.day === ns.data.today) await api('/api/day/start', { method: 'POST', body: { date: ns.day } });
+    toast('Öntés elindítva'); loadDay();
   } else if (d.finish) {
     ns.finishing = ns.finishing === +d.finish ? null : +d.finish; renderTasks(ns.data);
     $(`[data-finish-form="${d.finish}"] input[name="done_qty"]`)?.focus();
@@ -154,13 +302,13 @@ $('#tasks').addEventListener('click', async (e) => {
     ns.finishing = null; renderTasks(ns.data);
   } else if (d.reopenTask) {
     await api(`/api/tasks/${d.reopenTask}/reopen`, { method: 'POST', body: {} });
-    ns.finishing = null; loadNap();
+    ns.finishing = null; loadDay();
   } else if (d.delTask) {
     const t = ns.data.tasks.find((x) => x.id === +d.delTask);
     if (!confirm(`Törlöd: ${taskName(t)}?${t.run_id ? '\nA hozzá tartozó kötés megmarad.' : ''}`)) return;
-    await api(`/api/tasks/${d.delTask}`, { method: 'DELETE' }); loadNap();
+    await api(`/api/tasks/${d.delTask}`, { method: 'DELETE' }); loadDay();
   } else if (d.editTask) {
-    openTaskForm({ edit: +d.editTask });
+    openTaskForm({ edit: ns.data.tasks.find((x) => x.id === +d.editTask) });
   }
 });
 
@@ -174,7 +322,6 @@ $('#tasks').addEventListener('submit', async (e) => {
   if (t.kind === 'ontes') {
     body.ended_at = toIso(ns.day, v.ended);
     if (v.curing) body.curing = v.curing;
-    // Ha nem indítottad el külön, a kezdést itt is meg lehet adni.
     if (v.started && !t.started_at) await api(`/api/tasks/${t.id}/start`, { method: 'POST', body: { at: toIso(ns.day, v.started) } });
   }
   const btn = f.querySelector('[type="submit"]'); btn.disabled = true;
@@ -182,47 +329,48 @@ $('#tasks').addEventListener('submit', async (e) => {
     const res = await api(`/api/tasks/${t.id}/finish`, { method: 'POST', body });
     ns.finishing = null;
     toast(res.run_id && !t.run_id ? 'Öntés lezárva, a kötés elindult' : 'Mentve');
-    loadNap();
+    loadDay();
   } finally { btn.disabled = false; }
 });
 
-// --- Feladat felvétele / szerkesztése ---
-function openTaskForm(mode) {
+// --- Feladat felvétele / szerkesztése (felugró ablak; nap-, hét- és hónapnézetből is) ---
+async function openTaskForm(mode, day = ns.day) {
+  if (!ns.jobs.length && !ns.jobsLoaded) { ns.jobs = (await api('/api/jobs')).filter((j) => j.status === 'Aktív'); ns.jobsLoaded = true; }
   ns.taskMode = mode;
   const f = $('#task-form');
   f.reset();
-  const t = mode.edit ? ns.data.tasks.find((x) => x.id === mode.edit) : null;
+  $('#tf-job').innerHTML = opts(ns.jobs.map((j) => [j.id, j.name]), null, '—');
+  const t = mode.edit || null;
   const extra = mode === 'extra' || (t && t.unplanned);
-  $('#task-form-title').textContent = t ? 'Feladat szerkesztése' : extra ? 'Plusz munka (amit nem terveztél, de megcsináltatok)' : 'Tervezett feladat';
-  $('#tf-qty-label').textContent = extra ? 'Elvégzett mennyiség' : 'Tervezett mennyiség';
+  $('#task-form-title').textContent = t ? 'Feladat szerkesztése' : extra ? 'Plusz munka' : 'Tervezett feladat';
   f.kind.disabled = !!t;
+  f.day.value = t ? t.day : day;
   if (t) {
-    f.kind.value = t.kind; f.template.value = t.template || ns.templates[0]; f.job_id.value = t.job_id || '';
+    f.kind.value = t.kind; syncTaskForm();
+    f.template.value = t.template || ''; f.job_id.value = t.job_id || '';
     f.qty.value = (extra ? t.done_qty : t.planned_qty) ?? ''; f.title.value = t.title; f.note.value = t.note;
   } else {
-    f.kind.value = 'ontes';
+    f.kind.value = 'ontes'; syncTaskForm();
   }
-  syncTaskForm();
-  f.hidden = false; $('#task-add-btns').hidden = true;
-  f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  $('#task-dialog').showModal();
 }
 function syncTaskForm() {
   const f = $('#task-form'), k = f.kind.value;
+  const extra = ns.taskMode === 'extra' || ns.taskMode?.edit?.unplanned;
   f.querySelector('[data-for="template"]').hidden = !['ontes', 'kiforgatas'].includes(k);
   f.querySelector('[data-for="job"]').hidden = k !== 'telepites';
   f.querySelector('[data-for="title"]').hidden = ['ontes', 'telepites'].includes(k);
   f.querySelector('[data-for="qty"]').hidden = k === 'egyeb';
-  if (k === 'kiforgatas' && !$('#tf-template option[value=""]')) $('#tf-template').insertAdjacentHTML('afterbegin', '<option value="">bármelyik</option>');
-  if (k !== 'kiforgatas') $('#tf-template option[value=""]')?.remove();
+  $('#tf-template').innerHTML = (k === 'kiforgatas' ? '<option value="">bármelyik</option>' : '') + opts(ns.templates.map((t) => [t, t]));
   const unit = ns.cfg.kinds[k].unit;
-  $('#tf-qty-label').textContent = `${ns.taskMode === 'extra' ? 'Elvégzett' : 'Tervezett'} mennyiség${unit ? ` (${unit})` : ''}`;
+  $('#tf-qty-label').textContent = `${extra ? 'Elvégzett' : 'Tervezett'} mennyiség${unit ? ` (${unit})` : ''}`;
 }
 $('#tf-kind').addEventListener('change', syncTaskForm);
 $('#task-add-btns').addEventListener('click', (e) => {
   const b = e.target.closest('[data-add-task]');
   if (b) openTaskForm(b.dataset.addTask);
 });
-$('#tf-cancel').addEventListener('click', () => { $('#task-form').hidden = true; $('#task-add-btns').hidden = false; });
+$('#tf-cancel').addEventListener('click', () => $('#task-dialog').close());
 $('#task-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target, k = f.kind.value, mode = ns.taskMode;
@@ -233,14 +381,14 @@ $('#task-form').addEventListener('submit', async (e) => {
     note: f.note.value,
   };
   if (mode.edit) {
-    const t = ns.data.tasks.find((x) => x.id === mode.edit);
-    await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { ...common, [t.unplanned ? 'done_qty' : 'planned_qty']: f.qty.value } });
+    const t = mode.edit;
+    await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: { ...common, day: f.day.value, [t.unplanned ? 'done_qty' : 'planned_qty']: f.qty.value } });
   } else {
-    await api('/api/tasks', { method: 'POST', body: { day: ns.day, kind: k, ...common, unplanned: mode === 'extra',
+    await api('/api/tasks', { method: 'POST', body: { day: f.day.value, kind: k, ...common, unplanned: mode === 'extra',
       [mode === 'extra' ? 'done_qty' : 'planned_qty']: f.qty.value } });
   }
-  f.hidden = true; $('#task-add-btns').hidden = false;
-  toast('Mentve'); loadNap();
+  $('#task-dialog').close();
+  toast('Mentve'); reload();
 });
 
 // --- Munkások aznap ---
@@ -284,11 +432,11 @@ function logForm(l, d) {
 $('#logs').addEventListener('click', async (e) => {
   const b = e.target.closest('button');
   if (!b) return;
-  if (b.dataset.leave) { await api(`/api/worklogs/${b.dataset.leave}`, { method: 'PATCH', body: { leave: true } }); toast('Távozás rögzítve'); loadNap(); }
+  if (b.dataset.leave) { await api(`/api/worklogs/${b.dataset.leave}`, { method: 'PATCH', body: { leave: true } }); toast('Távozás rögzítve'); loadDay(); }
   if (b.dataset.editLog) { ns.editingLog = +b.dataset.editLog; renderLogs(ns.data); }
   if (b.dataset.logCancel !== undefined) { ns.editingLog = null; renderLogs(ns.data); }
   if (b.dataset.delLog && confirm('Törlöd ezt a munkanapot?')) {
-    await api(`/api/worklogs/${b.dataset.delLog}`, { method: 'DELETE' }); ns.editingLog = null; loadNap();
+    await api(`/api/worklogs/${b.dataset.delLog}`, { method: 'DELETE' }); ns.editingLog = null; loadDay();
   }
 });
 $('#logs').addEventListener('submit', async (e) => {
@@ -297,18 +445,17 @@ $('#logs').addEventListener('submit', async (e) => {
   e.preventDefault();
   const v = Object.fromEntries(new FormData(f).entries());
   await api(`/api/worklogs/${f.dataset.logForm}`, { method: 'PATCH', body: v });
-  ns.editingLog = null; toast('Mentve'); loadNap();
+  ns.editingLog = null; toast('Mentve'); loadDay();
 });
 $('#quick-workers').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-arrive]');
   if (!b) return;
   if (ns.day !== ns.data.today) {
-    // Múltbeli napnál az időket a részletes űrlapon kell megadni.
     $('#log-details').open = true; $('#lf-worker').value = b.dataset.arrive; $('#log-form').start_time.focus();
     return;
   }
   await api('/api/worklogs', { method: 'POST', body: { day: ns.day, worker_id: b.dataset.arrive } });
-  toast('Érkezés rögzítve'); loadNap();
+  toast('Érkezés rögzítve'); loadDay();
 });
 $('#lf-kind').addEventListener('change', () => { $('#log-form [data-for="job"]').hidden = $('#lf-kind').value !== 'telepites'; });
 $('#log-form [data-for="job"]').hidden = true;
@@ -317,7 +464,7 @@ $('#log-form').addEventListener('submit', async (e) => {
   const v = Object.fromEntries(new FormData(e.target).entries());
   if (!v.start_time) delete v.start_time;
   await api('/api/worklogs', { method: 'POST', body: { day: ns.day, ...v } });
-  e.target.reset(); $('#log-details').open = false; toast('Rögzítve'); loadNap();
+  e.target.reset(); $('#log-details').open = false; toast('Rögzítve'); loadDay();
 });
 
 // --- Napzárás ---
@@ -327,36 +474,131 @@ $('#day-close').addEventListener('click', async () => {
   if (open && !confirm(`${open} feladat még nincs lezárva; ezek „nem készült el” állapotba kerülnek. Lezárod a napot?`)) return;
   const res = await api('/api/day/close', { method: 'POST', body: { date: ns.day, note: $('#day-note').value, carry: $('#day-carry').checked } });
   toast(`Nap lezárva${res.carried ? ` · ${res.carried} feladat átkerült holnapra` : ''} · ${s.poured} db öntve`);
-  loadNap();
+  loadDay(); window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 $('#day-note-save').addEventListener('click', async () => {
   await api('/api/day', { method: 'PATCH', body: { date: ns.day, note: $('#day-note').value } }); toast('Megjegyzés mentve');
 });
 $('#day-reopen').addEventListener('click', async () => {
-  await api('/api/day/reopen', { method: 'POST', body: { date: ns.day } }); loadNap();
+  await api('/api/day/reopen', { method: 'POST', body: { date: ns.day } }); loadDay();
 });
 
-// --- Napváltás ---
-const goDay = (d) => { if (!d) return; ns.day = d; ns.finishing = null; ns.editingLog = null; $('#task-form').hidden = true; $('#task-add-btns').hidden = false; loadNap(); };
-$('#day-prev').addEventListener('click', () => goDay(shiftDay(ns.day, -1)));
-$('#day-next').addEventListener('click', () => goDay(shiftDay(ns.day, 1)));
-$('#day-today').addEventListener('click', () => goDay(ns.data?.today || ns.cfg.today));
-$('#day-date').addEventListener('change', (e) => goDay(e.target.value));
-
-async function loadDays() {
-  const days = await api('/api/days?limit=21', { quiet: true }).catch(() => []);
-  $('#days-table tbody').innerHTML = days.map((x) => `<tr class="${x.day === ns.day ? 'selected' : ''}">
-    <td><button class="link" data-goto="${x.day}">${x.day.slice(5).replace('-', '.')}.</button> <span class="muted small">${weekday(x.day).slice(0, 3)}</span></td>
-    <td class="num">${x.planned_total ? `${x.planned_done}/${x.planned_total}` : '–'}</td>
-    <td class="num">${x.poured || '–'}</td><td class="num">${x.demolded || '–'}</td><td class="num">${x.installed_m ? fmt(x.installed_m, 0) : '–'}</td>
-    <td class="num">${x.hours ? fmt(x.hours, 1) : '–'}</td><td class="num">${x.cost ? ft(x.cost) : '–'}</td>
-    <td class="num">${x.per_man_hour !== null ? fmt(x.per_man_hour, 1) : '–'}</td>
-    <td>${x.closed_at ? '✓' : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">Még nincs adat.</td></tr>';
+// ===================================================================
+// Hét és hónap
+// ===================================================================
+function dayClass(x, today) {
+  const planned = x.tasks.filter((t) => !t.unplanned);
+  if (x.closed_at) {
+    if (!planned.length) return 'done';
+    const c = completion(x.tasks);
+    return c >= 0.999 ? 'done' : c > 0 ? 'part' : 'miss';
+  }
+  if (x.started_at) return 'running';
+  if (x.day < today && planned.length) return 'open';
+  return planned.length ? 'plan' : 'empty';
 }
-$('#days-table').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-goto]');
-  if (b) { goDay(b.dataset.goto); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+const DAY_STATE_TEXT = { done: '✓ lezárva', part: '✓ lezárva', miss: '✓ lezárva', running: '● fut', open: 'nincs lezárva', plan: 'terv', empty: '' };
+
+function periodSummary(days, el) {
+  const sum = (f) => days.reduce((a, x) => a + (Number(f(x.summary)) || 0), 0);
+  const all = days.flatMap((x) => x.tasks);
+  const c = completion(all.filter((t) => t.day <= ns.cfg.today));
+  const prod = sum((s) => s.prod_hours), poured = sum((s) => s.poured);
+  $(el).innerHTML = [
+    `<span>Öntve <b>${poured}</b><small> / ${sum((s) => s.poured_planned)} db terv</small></span>`,
+    `<span>Kiforgatva <b>${sum((s) => s.demolded)}</b> db</span>`,
+    `<span>Telepítve <b>${fmt(sum((s) => s.installed_m), 0)}</b> m</span>`,
+    `<span>Terv teljesítése <b>${c === null ? '–' : Math.round(c * 100) + '%'}</b><small> (eddigi napok)</small></span>`,
+    `<span>Munkaóra <b>${fmt(sum((s) => s.hours), 0)}</b></span>`,
+    `<span>Bér <b>${ft(sum((s) => s.cost))}</b></span>`,
+    prod && poured ? `<span>Panel/ember-óra <b>${fmt(poured / prod, 1)}</b></span>` : '',
+  ].join('');
+}
+
+async function loadWeek() {
+  const from = monday(ns.day), to = shiftDay(from, 6);
+  const p = await api(`/api/plan?from=${from}&to=${to}`);
+  ns.plan = p;
+  $('#plan-title').textContent = `${from.slice(0, 4)}. ${MONTHS[+from.slice(5, 7) - 1]} ${+from.slice(8)}. – ${from.slice(5, 7) === to.slice(5, 7) ? '' : MONTHS[+to.slice(5, 7) - 1] + ' '}${+to.slice(8)}.`;
+  periodSummary(p.days, '#week-summary');
+  $('#week').innerHTML = p.days.map((x) => {
+    const cls = dayClass(x, p.today);
+    const c = completion(x.tasks);
+    const s = x.summary;
+    return `<div class="wday st-${cls} ${x.day === p.today ? 'today' : ''}" data-drop-day="${x.day}">
+      <button class="wday-head" data-goto="${x.day}" type="button">
+        <span><b>${WD_SHORT[dow(x.day)]}</b> ${dm(x.day)}</span><span class="small">${DAY_STATE_TEXT[cls]}</span></button>
+      ${c !== null ? `<div class="bar sm ${c >= 0.999 ? 'done' : ''}"><i style="width:${Math.round(c * 100)}%"></i></div>` : ''}
+      <div class="wtasks">${x.tasks.map((t) => {
+        const q = t.unplanned ? (t.done_qty ?? '') : t.done_qty !== null ? `${fmt(t.done_qty, 0)}/${fmt(t.planned_qty, 0)}` : t.planned_qty !== null ? fmt(t.planned_qty, 0) : '';
+        return `<div class="tchip st-${t.status} ${t.unplanned ? 'extra' : ''}" draggable="true" data-chip="${t.id}" title="${esc(STATUS[t.status][0])}">
+          <span>${t.unplanned ? '+ ' : ''}${esc(taskName(t))}</span>${q !== '' ? `<b>${q}${t.unit ? ' ' + t.unit : ''}</b>` : ''}</div>`;
+      }).join('')}</div>
+      ${s.poured || s.hours ? `<div class="wfoot small muted">${s.poured ? `${s.poured} db öntve` : ''}${s.poured && s.hours ? ' · ' : ''}${s.hours ? `${fmt(s.hours, 0)} ó` : ''}</div>` : ''}
+      <button class="btn sm ghost wadd" data-add-day="${x.day}" type="button">+ feladat</button>
+    </div>`;
+  }).join('');
+}
+
+const weekEl = $('#week');
+weekEl.addEventListener('click', (e) => {
+  const go = e.target.closest('[data-goto]');
+  const add = e.target.closest('[data-add-day]');
+  const chip = e.target.closest('[data-chip]');
+  if (go) setView('day', go.dataset.goto);
+  else if (add) openTaskForm('plan', add.dataset.addDay);
+  else if (chip) {
+    const t = ns.plan.days.flatMap((x) => x.tasks).find((x) => x.id === +chip.dataset.chip);
+    openTaskForm({ edit: t });
+  }
 });
+// Húzás másik napra (gépen).
+weekEl.addEventListener('dragstart', (e) => {
+  const c = e.target.closest('[data-chip]');
+  if (!c) return;
+  e.dataTransfer.setData('text/plain', c.dataset.chip); e.dataTransfer.effectAllowed = 'move'; c.classList.add('dragging');
+});
+weekEl.addEventListener('dragend', (e) => e.target.closest?.('[data-chip]')?.classList.remove('dragging'));
+weekEl.addEventListener('dragover', (e) => {
+  const d = e.target.closest('[data-drop-day]');
+  if (!d) return;
+  e.preventDefault(); $$('.wday.over').forEach((x) => x !== d && x.classList.remove('over')); d.classList.add('over');
+});
+weekEl.addEventListener('dragleave', (e) => { const d = e.target.closest('[data-drop-day]'); if (d && !d.contains(e.relatedTarget)) d.classList.remove('over'); });
+weekEl.addEventListener('drop', async (e) => {
+  const d = e.target.closest('[data-drop-day]');
+  if (!d) return;
+  e.preventDefault(); d.classList.remove('over');
+  const id = e.dataTransfer.getData('text/plain');
+  const t = ns.plan.days.flatMap((x) => x.tasks).find((x) => x.id === +id);
+  if (!t || t.day === d.dataset.dropDay) return;
+  await api(`/api/tasks/${id}`, { method: 'PATCH', body: { day: d.dataset.dropDay } });
+  toast(`Áthelyezve: ${dm(d.dataset.dropDay)}`); loadWeek();
+});
+
+async function loadMonth() {
+  const first = `${ns.day.slice(0, 7)}-01`, last = monthEnd(first);
+  const from = monday(first), to = shiftDay(monday(last), 6);
+  const p = await api(`/api/plan?from=${from}&to=${to}`);
+  ns.plan = p;
+  $('#plan-title').textContent = `${first.slice(0, 4)}. ${MONTHS[+first.slice(5, 7) - 1]}`;
+  periodSummary(p.days.filter((x) => x.day >= first && x.day <= last), '#month-summary');
+  $('#month').innerHTML = p.days.map((x) => {
+    const cls = dayClass(x, p.today);
+    const c = completion(x.tasks);
+    const s = x.summary;
+    const planned = x.tasks.filter((t) => !t.unplanned).length;
+    const out = x.day < first || x.day > last;
+    return `<button type="button" class="mday st-${cls} ${out ? 'out' : ''} ${x.day === p.today ? 'today' : ''}" data-goto="${x.day}">
+      <span class="mnum">${+x.day.slice(8)}</span>
+      ${c !== null ? `<span class="bar sm ${c >= 0.999 ? 'done' : ''}"><i style="width:${Math.round(c * 100)}%"></i></span>` : ''}
+      ${s.poured || s.poured_planned ? `<span class="mline" title="öntött / tervezett darab">${s.poured}${s.poured_planned ? '/' + s.poured_planned : ''}</span>` : ''}
+      ${s.installed_m ? `<span class="mline">${fmt(s.installed_m, 0)} m</span>` : ''}
+      ${planned && !s.poured_planned ? `<span class="mline muted">${planned} feladat</span>` : ''}
+    </button>`;
+  }).join('');
+}
+$('#month').addEventListener('click', (e) => { const b = e.target.closest('[data-goto]'); if (b) setView('day', b.dataset.goto); });
 
 // ===================================================================
 // Munkások
@@ -450,5 +692,5 @@ $('#worker-detail').addEventListener('click', async (e) => {
   const del = e.target.closest('[data-del-pay]');
   const go = e.target.closest('[data-goto-day]');
   if (del && confirm('Törlöd ezt a kifizetést?')) { await api(`/api/payments/${del.dataset.delPay}`, { method: 'DELETE' }); loadWorkers(); }
-  if (go) { ns.day = go.dataset.gotoDay; document.querySelector('.tabs button[data-tab="nap"]').click(); }
+  if (go) { ns.day = go.dataset.gotoDay; ns.view = 'day'; document.querySelector('.tabs button[data-tab="nap"]').click(); }
 });

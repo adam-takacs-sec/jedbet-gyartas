@@ -180,7 +180,7 @@ export async function routeNap(request, env, url, user, p, m) {
     const demTotal = dem.reduce((a, x) => a + x.panel_count, 0);
     return json({
       day, today: localDate(new Date()), now: localTime(new Date()),
-      closed_at: dayRow?.closed_at || null, note: dayRow?.note || '',
+      started_at: dayRow?.started_at || null, closed_at: dayRow?.closed_at || null, note: dayRow?.note || '',
       tasks, logs: lg, workers, jobs, open_runs: openRuns,
       demolded: demByTemplate, summary: summarize(tasks, lg, demTotal),
     });
@@ -191,6 +191,35 @@ export async function routeNap(request, env, url, user, p, m) {
     await db.prepare(`INSERT INTO days (day, note) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET note = excluded.note`)
       .bind(day, str(b.note, 'megjegyzés', { max: 2000 })).run();
     return json({ ok: true });
+  }
+  if (p === '/api/day/start' && m === 'POST') {
+    const b = await body(request);
+    const day = dateArg(b.date);
+    const at = b.at ? new Date(b.at) : new Date();
+    if (Number.isNaN(at.getTime())) bad('Érvénytelen időpont');
+    await db.prepare(`INSERT INTO days (day, started_at) VALUES (?, ?)
+      ON CONFLICT(day) DO UPDATE SET started_at = excluded.started_at, closed_at = NULL`).bind(day, at.toISOString()).run();
+    return json({ ok: true, started_at: at.toISOString() });
+  }
+  // Heti / havi terv: feladatok és napi összesítők egy dátumtartományra.
+  if (p === '/api/plan' && m === 'GET') {
+    const from = dateArg(url.searchParams.get('from'), 'kezdő dátum');
+    const to = dateArg(url.searchParams.get('to'), 'záró dátum');
+    if (to < from || (Date.parse(to) - Date.parse(from)) / 86400000 > 62) bad('Túl hosszú időszak');
+    const [{ results: tasks }, { results: logs }, { results: dayRows }] = await db.batch([
+      db.prepare(`${TASK_SELECT} WHERE t.day >= ? AND t.day <= ? ORDER BY t.day, t.unplanned, t.sort, t.id`).bind(from, to),
+      db.prepare('SELECT * FROM work_logs WHERE day >= ? AND day <= ?').bind(from, to),
+      db.prepare('SELECT * FROM days WHERE day >= ? AND day <= ?').bind(from, to),
+    ]);
+    const dem = await demoldedByDay(db, from, to);
+    const days = [];
+    for (let d = from; d <= to; d = addDays(d, 1)) {
+      const row = dayRows.find((x) => x.day === d);
+      const tk = tasks.filter((t) => t.day === d);
+      days.push({ day: d, started_at: row?.started_at || null, closed_at: row?.closed_at || null, note: row?.note || '',
+        tasks: tk, summary: summarize(tk, logs.filter((l) => l.day === d), (dem[d] || []).reduce((a, x) => a + x.panel_count, 0)) });
+    }
+    return json({ from, to, today: localDate(new Date()), days });
   }
   if (p === '/api/day/close' && m === 'POST') {
     const b = await body(request);
@@ -247,7 +276,7 @@ export async function routeNap(request, env, url, user, p, m) {
     ]);
     const dem = await demoldedByDay(db, from, to);
     return json(dayList.map(({ day }) => ({
-      day, closed_at: dayRows.find((x) => x.day === day)?.closed_at || null,
+      day, closed_at: dayRows.find((x) => x.day === day)?.closed_at || null, started_at: dayRows.find((x) => x.day === day)?.started_at || null,
       ...summarize(tasks.filter((t) => t.day === day), logs.filter((l) => l.day === day),
         (dem[day] || []).reduce((a, x) => a + x.panel_count, 0)),
     })));

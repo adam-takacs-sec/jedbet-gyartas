@@ -22,6 +22,7 @@ Pi (jedbet_agent.py) ── HTTPS ───────┘  /device/readings, /d
 
 ## Napi lap
 
+- Nézetek: Nap / Hét / Hónap. A nap fejléce mutatja az állapotot (Terv → Folyamatban → Lezárva), a terv teljesítését és egy idővonalat (nap, munkások, öntések). Hét nézetben a feladat áthúzható másik napra.
 - Reggel: tervezett feladatok (öntés mintával és darabbal, kiforgatás, mosás, telepítés projekthez, egyéb).
 - Öntés: *Öntés indítása* rögzíti a kezdést; *Öntés lezárása* az öntött darabot és a befejezést, és innen indul a kötés (vagy egy nyitott kötéshez adható).
 - Kiforgatáskor a kötésnél a raklapok darabszáma; a kötés kártyája mutatja az öntött és a kiforgatott darabot.
@@ -62,4 +63,4 @@ printf 'DEV_NO_AUTH=1\nDEVICE_TOKEN=valami-legalabb-24-karakter-hosszu\n' > .dev
 npm run db:local && npm run dev
 ```
 
-Séma-változás: új fájl a `migrations/` alá, majd `npx wrangler d1 migrations apply jedbet-gyartas-db --remote`.
+Séma-változás: új fájl a `migrations/` alá. Az éles D1-ben nincs `d1_migrations` napló (a sémát kézzel vittük fel), ezért az új migrációt közvetlenül kell lefuttatni rajta (`wrangler d1 execute jedbet-gyartas-db --remote --file migrations/000X_….sql`), nem `migrations apply`-jal.

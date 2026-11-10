@@ -87,7 +87,46 @@ function layout(stages) {
   });
 }
 
-function topView(stages, { mini = false, highlight = null, maxW = 760, maxH = 400 } = {}) {
+// Oszlop felülről: négyzet, a megadott oldalakon horonnyal (a horony szája kicsit szélesebb), letört sarkokkal.
+// sides: { l, r, t, b } – helyi koordinátában x a kerítés iránya.
+function postPath(S, sides) {
+  const h = S / 2, w = S * 0.3, d = (S - w) / 2, g = S * 0.36, tp = S * 0.07, c = S * 0.09;
+  const p = [];
+  const add = (x, y) => p.push(`${x.toFixed(2)} ${y.toFixed(2)}`);
+  add(-h + c, -h);
+  if (sides.t) { add(-g / 2 - tp, -h); add(-g / 2, -h + d); add(g / 2, -h + d); add(g / 2 + tp, -h); }
+  add(h - c, -h); add(h, -h + c);
+  if (sides.r) { add(h, -g / 2 - tp); add(h - d, -g / 2); add(h - d, g / 2); add(h, g / 2 + tp); }
+  add(h, h - c); add(h - c, h);
+  if (sides.b) { add(g / 2 + tp, h); add(g / 2, h - d); add(-g / 2, h - d); add(-g / 2 - tp, h); }
+  add(-h + c, h); add(-h, h - c);
+  if (sides.l) { add(-h, g / 2 + tp); add(-h + d, g / 2); add(-h + d, -g / 2); add(-h, -g / 2 - tp); }
+  add(-h, -h + c);
+  return `M${p.join('L')}Z`;
+}
+
+// Panel felülről: a hátoldal egyenes, az előoldalon finom, mintától függő dombormű; hosszában enyhén elvékonyodik.
+function panelPath(x0, x1, t, template, seed) {
+  const n = Math.max(2, Math.round((x1 - x0) / 3));
+  const amp = t * 0.09;
+  let r = seed * 9301 + 49297;
+  const rnd = () => ((r = (r * 9301 + 49297) % 233280) / 233280);
+  const top = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n, x = x0 + (x1 - x0) * f;
+    const thick = t * (1 - 0.22 * f); // lejtés
+    let rel = 0;
+    if (i > 0 && i < n) {
+      if (template === 'Hullám') rel = Math.sin(f * Math.PI * 8) * amp;
+      else if (template === 'Mediterrán') rel = (Math.floor(f * 5) % 2 ? amp : -amp * 0.4);
+      else rel = (rnd() - 0.5) * 2 * amp;
+    }
+    top.push(`${x.toFixed(2)} ${(t / 2 - thick - rel).toFixed(2)}`);
+  }
+  return `M${top.join('L')}L${x1.toFixed(2)} ${(t / 2).toFixed(2)}L${x0.toFixed(2)} ${(t / 2).toFixed(2)}Z`;
+}
+
+function topView(stages, { mini = false, highlight = null, maxW = 760, maxH = 400, zoom = 1 } = {}) {
   if (!stages.length) return '';
   const segs = layout(stages);
   const xs = segs.flatMap((s) => [s.x0, s.x1]), ys = segs.flatMap((s) => [s.y0, s.y1]);
@@ -99,45 +138,68 @@ function topView(stages, { mini = false, highlight = null, maxW = 760, maxH = 40
   const W = Math.max((maxX - minX) * k + 2 * padX, mini ? 140 : 300), H = Math.max((maxY - minY) * k + 2 * padY, mini ? 50 : 150);
   const ox = (W - (maxX - minX) * k) / 2 - minX * k, oy = (H - (maxY - minY) * k) / 2 - minY * k;
   const P = (x, y) => [ox + x * k, oy + y * k];
-  const T = mini ? 5 : Math.max(4, Math.min(12, 0.4 * k)); // kerítés vastagsága (px)
-  const midPosts = k >= 7; // ha túl sűrű lenne, csak a végoszlopokat rajzoljuk
-  const gap = mini ? 0 : Math.min(2, 0.08 * k); // rés a táblák között
-  const cx = xs.reduce((a, v) => a + v, 0) / xs.length, cy = ys.reduce((a, v) => a + v, 0) / ys.length; // „telek” közepe
+  // Méretek pixelben (a valóságnál vastagabbra rajzolva, hogy látszódjon): oszlop S, panel t.
+  // Valós arány: oszlop kb. 18 cm, panel kb. 5 cm; távolról legalább 8 képpont, hogy látszódjon.
+  const S = mini ? 0 : Math.max(8 / zoom, 0.18 * k);
+  const t = S * 0.3;
+  const cx = xs.reduce((a, v) => a + v, 0) / xs.length, cy = ys.reduce((a, v) => a + v, 0) / ys.length;
 
-  // Telek: halvány kitöltés a vonal által bezárt területre.
-  const pts = segs.map((s) => P(s.x0, s.y0)).concat([P(segs.at(-1).x1, segs.at(-1).y1)]);
   const perim = segs.reduce((a, x) => a + x.length_m, 0);
   const closed = segs.length >= 3 && Math.hypot(segs.at(-1).x1 - segs[0].x0, segs.at(-1).y1 - segs[0].y0) < 0.15 * perim;
-  let out = closed ? `<polygon points="${pts.map((p) => p.join(',')).join(' ')}" fill="rgba(255,255,255,.035)" stroke="none"/>` : '';
+  const pts = segs.map((s) => P(s.x0, s.y0)).concat([P(segs.at(-1).x1, segs.at(-1).y1)]);
+  let out = closed ? `<polygon points="${pts.map((p) => p.join(',')).join(' ')}" fill="rgba(255,255,255,.035)"/>` : '';
   let posts = '', badges = '';
 
   segs.forEach((s, i) => {
     const done = Math.min(s.done_m || 0, s.length_m);
     const dim = highlight !== null && highlight !== s.id ? ' opacity=".28"' : '';
-    const at = (d) => P(s.x0 + s.dx * d, s.y0 + s.dy * d);
+    const [ax, ay] = P(s.x0, s.y0);
     const rot = (Math.atan2(s.dy, s.dx) * 180) / Math.PI;
     const spans = Math.max(1, Math.ceil(s.length_m / 2 - 1e-9));
-    let g = '';
+    if (mini) {
+      const [bx, by] = P(s.x1, s.y1);
+      const [cx2, cy2] = P(s.x0 + s.dx * done, s.y0 + s.dy * done);
+      out += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#7b8087" stroke-width="5"/>`;
+      if (done > 0) out += `<line x1="${ax}" y1="${ay}" x2="${cx2}" y2="${cy2}" stroke="${RED}" stroke-width="5"/>`;
+      return;
+    }
+    // A szakasz helyi koordinátarendszerben: x a kerítés mentén (px), 0 = a szakasz eleje.
+    const L = s.length_m * k;
+    const inset = S / 2 - (S - S * 0.3) / 2 + 0.6 / zoom; // a panel a horony aljáig ér
+    let g = `<g${dim} data-sid="${s.id}" transform="translate(${ax.toFixed(2)} ${ay.toFixed(2)}) rotate(${rot.toFixed(2)})">`;
     for (let j = 0; j < spans; j++) {
       const d0 = j * 2, d1 = Math.min(s.length_m, (j + 1) * 2);
-      const [x0, y0] = at(d0);
-      const len = (d1 - d0) * k;
+      const x0 = d0 * k + inset, x1 = d1 * k - inset;
       const full = d1 <= done + 1e-6, part = !full && done > d0;
-      g += `<g transform="translate(${x0} ${y0}) rotate(${rot})"><rect x="${gap}" y="${-T / 2}" width="${Math.max(1, len - 2 * gap)}" height="${T}" rx="${mini ? 1 : 2}" fill="${full ? RED : '#7b8087'}"/>`;
-      if (part) g += `<rect x="${gap}" y="${-T / 2}" width="${Math.max(1, (done - d0) * k - gap)}" height="${T}" rx="2" fill="${RED}"/>`;
-      g += '</g>';
+      const path = panelPath(x0, x1, t, s.template, i * 97 + j + 1);
+      g += `<path d="${path}" fill="${full ? RED : '#8d9299'}" stroke="${full ? '#ff7a7a' : '#b9bdc2'}" stroke-width=".6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+      if (part) {
+        const cut = done * k;
+        g += `<clipPath id="cp-${s.id}-${j}"><rect x="${x0}" y="${-t}" width="${Math.max(0, cut - x0)}" height="${2 * t}"/></clipPath>
+          <path d="${path}" fill="${RED}" stroke="#ff7a7a" stroke-width=".6" vector-effect="non-scaling-stroke" clip-path="url(#cp-${s.id}-${j})"/>`;
+      }
     }
-    out += `<g${dim}>${g}</g>`;
-    if (mini) return;
+    // Oszlopok: középoszlop két horonnyal, végoszlop eggyel; sarokoszlopnál a következő szakasz felé is.
+    const next = segs[i + 1];
+    const nextTurn = next ? ((Number(next.turn) % 360) + 360) % 360 : null;
     for (let j = 0; j <= spans; j++) {
-      const d = Math.min(j * 2, s.length_m), isEnd = j === 0 || j === spans;
-      if (j === 0 && i > 0) continue; // a csatlakozó oszlopot az előző szakasz már kirajzolta
-      if (!isEnd && !midPosts) continue;
-      const [px, py] = at(d), sz = T + (isEnd ? 6 : 3);
+      if (j === 0 && i > 0) continue; // ezt az előző szakasz már kirajzolta (sarokoszlopként)
+      const d = Math.min(j * 2, s.length_m);
+      const isStart = j === 0, isEnd = j === spans;
+      const sides = { l: !isStart, r: !isEnd };
+      if (isEnd && next) {
+        if (nextTurn === 0) sides.r = true;
+        else if (nextTurn === 90 || nextTurn === 45) sides.b = true;
+        else if (nextTurn === 270 || nextTurn === 315) sides.t = true;
+      }
       const isDone = done > 0 && d <= done + 1e-6;
-      posts += `<rect${dim} x="${px - sz / 2}" y="${py - sz / 2}" width="${sz}" height="${sz}" rx="1.5" fill="${isDone ? '#8f1414' : '#d6d8db'}" stroke="${isDone ? '#ff8a8a' : '#16181b'}" stroke-width="${isDone ? 1 : 1.5}" transform="rotate(${rot} ${px} ${py})"/>`;
+      const sz = S * (isStart || isEnd ? 1.12 : 1);
+      g += `<path transform="translate(${(d * k).toFixed(2)} 0)" d="${postPath(sz, sides)}" fill="${isDone ? '#a51d1d' : '#d9dbde'}" stroke="${isDone ? '#ff8a8a' : '#16181b'}" stroke-width="${isDone ? .8 : 1}" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
     }
-    // Címke a szakasz közepénél, a telek közepétől elfelé, vízszintesen.
+    out += g + '</g>';
+
+    // Címke
+    const at = (dd) => P(s.x0 + s.dx * dd, s.y0 + s.dy * dd);
     const [mx, my] = at(s.length_m / 2);
     let nx = -s.dy, ny = s.dx;
     const midX = s.x0 + s.dx * s.length_m / 2, midY = s.y0 + s.dy * s.length_m / 2;
@@ -145,25 +207,134 @@ function topView(stages, { mini = false, highlight = null, maxW = 760, maxH = 40
     const complete = done >= s.length_m - 1e-6;
     const txt = done > 0 && !complete ? `${fmt(done, 0)}/${fmt(s.length_m, 0)} m` : `${fmt(s.length_m, s.length_m % 1 ? 1 : 0)} m`;
     const tw = 32 + txt.length * 6.6;
-    const reach = Math.abs(nx) * tw / 2 + Math.abs(ny) * 12; // a címke fél kiterjedése a normális irányában
-    const off = onLine ? 0 : T / 2 + 8 + reach;
+    const reach = Math.abs(nx) * tw / 2 + Math.abs(ny) * 12;
+    const off = onLine ? 0 : S / 2 + 8 + reach;
     const lx = mx + nx * off, ly = my + ny * off;
-    badges += `<g${dim} transform="translate(${lx.toFixed(1)} ${ly.toFixed(1)})">
+    badges += `<g${dim} data-sid="${s.id}" class="tv-badge" data-lx="${lx.toFixed(1)}" data-ly="${ly.toFixed(1)}" transform="translate(${lx.toFixed(1)} ${ly.toFixed(1)})">
       <rect x="${-tw / 2}" y="-12" width="${tw}" height="24" rx="12" fill="${complete ? RED : '#2c3035'}" stroke="${done > 0 ? RED : '#4a4e54'}" stroke-width="1.5"/>
       <circle cx="${-tw / 2 + 12}" cy="0" r="9" fill="${complete ? '#fff' : done > 0 ? RED : '#55595f'}"/>
       <text x="${-tw / 2 + 12}" y="3.8" text-anchor="middle" font-size="11" font-weight="800" fill="${complete ? RED : '#fff'}">${i + 1}</text>
       <text x="${-tw / 2 + 26}" y="4" font-size="11.5" font-weight="700" fill="#fff">${txt}</text></g>`;
   });
 
-  let scale = '';
-  if (!mini) {
-    const nice = [1, 2, 5, 10, 20, 50, 100].find((m) => m * k >= 50) || 100;
-    const sx = 16, sy = H - 16;
-    scale = `<g opacity=".7"><rect x="${sx}" y="${sy - 4}" width="${nice * k}" height="4" fill="none" stroke="var(--muted)" stroke-width="1"/>
-      <rect x="${sx}" y="${sy - 4}" width="${nice * k / 2}" height="4" fill="var(--muted)"/>
-      <text x="${sx + nice * k + 6}" y="${sy}" font-size="10" fill="var(--muted)">${nice} m</text></g>`;
-  }
-  return `<svg class="topview ${mini ? 'mini' : ''}" viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}" role="img" aria-label="Kerítés felülnézetből">${out}${posts}${badges}${scale}</svg>`;
+  // A szakaszok befoglaló téglalapja (nagyításhoz).
+  const boxes = segs.map((sg) => [sg.id, ...P(sg.x0, sg.y0), ...P(sg.x1, sg.y1)].map((v) => +(+v).toFixed(1)));
+  return `<svg class="topview ${mini ? 'mini' : ''}" viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}" data-k="${k.toFixed(3)}" data-boxes='${JSON.stringify(boxes)}' role="img" aria-label="Kerítés felülnézetből">${out}${posts}${badges}</svg>`;
+}
+
+// ---------------------------------------------------------------------------
+// Nagyítás / mozgatás a felülnézeten (viewBox). A címkék nagyításkor is ugyanakkorák maradnak.
+function enableZoom(wrap) {
+  const svg = wrap.querySelector('svg.topview');
+  if (!svg) return;
+  const base = svg.getAttribute('viewBox').split(' ').map(Number);
+  const k = +svg.dataset.k;
+  let v = { x: base[0], y: base[1], w: base[2], h: base[3] };
+  const ui = wrap.querySelector('.tv-ui');
+  let drawnZ = 1, raf = 0;
+  const redraw = (z) => {
+    // Nagyításkor újrarajzoljuk a tartalmat a valós arányokkal (az svg elem marad, így a mozdulat nem szakad meg).
+    if (!wrap._draw || Math.abs(Math.log(z / drawnZ)) < 0.15) return;
+    drawnZ = z;
+    const html = wrap._draw(z);
+    svg.innerHTML = html.slice(html.indexOf('>') + 1, html.lastIndexOf('</svg>'));
+    svg.querySelectorAll('.tv-badge').forEach((g) => g.setAttribute('transform', `translate(${g.dataset.lx} ${g.dataset.ly}) scale(${1 / z})`));
+  };
+  const apply = () => {
+    const z = base[2] / v.w;
+    svg.setAttribute('viewBox', `${v.x} ${v.y} ${v.w} ${v.h}`);
+    cancelAnimationFrame(raf); raf = requestAnimationFrame(() => redraw(z));
+    svg.querySelectorAll('.tv-badge').forEach((g) => g.setAttribute('transform', `translate(${g.dataset.lx} ${g.dataset.ly}) scale(${1 / z})`));
+    svg.style.touchAction = z > 1.01 ? 'none' : 'pan-x pan-y';
+    // Lépték a képernyőn mért pixel/méter alapján.
+    const pxPerM = k * (svg.getBoundingClientRect().width / v.w);
+    const nice = [0.5, 1, 2, 5, 10, 20, 50, 100].find((m) => m * pxPerM >= 50) || 100;
+    ui.querySelector('.tv-scale i').style.width = `${nice * pxPerM}px`;
+    ui.querySelector('.tv-scale span').textContent = `${String(nice).replace('.', ',')} m`;
+    ui.querySelector('[data-z="fit"]').hidden = z <= 1.01;
+  };
+  const clamp = () => {
+    v.w = Math.min(base[2], Math.max(base[2] / 16, v.w)); v.h = v.w * (base[3] / base[2]);
+    v.x = Math.min(base[0] + base[2] - v.w, Math.max(base[0], v.x));
+    v.y = Math.min(base[1] + base[3] - v.h, Math.max(base[1], v.y));
+  };
+  const zoomAt = (f, cx, cy) => {
+    const nw = Math.min(base[2], Math.max(base[2] / 16, v.w / f)), r = nw / v.w;
+    v = { x: cx - (cx - v.x) * r, y: cy - (cy - v.y) * r, w: nw, h: v.h * r };
+    clamp(); apply();
+  };
+  const toSvg = (cxs, cys) => { const r = svg.getBoundingClientRect(); return [v.x + ((cxs - r.left) / r.width) * v.w, v.y + ((cys - r.top) / r.height) * v.h]; };
+  const center = () => [v.x + v.w / 2, v.y + v.h / 2];
+  const segsPx = JSON.parse(svg.dataset.boxes);
+  // A kerítés legközelebbi pontja (hogy a + gomb ne üres területre nagyítson).
+  const nearest = (px, py) => {
+    let best = null, bd = Infinity;
+    for (const [, x1, y1, x2, y2] of segsPx) {
+      const dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy || 1;
+      const tt = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / l2));
+      const qx = x1 + tt * dx, qy = y1 + tt * dy, d = (qx - px) ** 2 + (qy - py) ** 2;
+      if (d < bd) { bd = d; best = [qx, qy]; }
+    }
+    return best || [px, py];
+  };
+  wrap._zoomTo = (id) => {
+    const sg = segsPx.find((x) => x[0] === id);
+    if (!sg) return;
+    // A szakasz eleje felé, kb. 8 m-es ablakkal, hogy az oszlopok és a panelek látszódjanak.
+    const w = Math.min(base[2], k * 9), h = w * (base[3] / base[2]);
+    const len = Math.hypot(sg[3] - sg[1], sg[4] - sg[2]) || 1;
+    const f = Math.min(1, (k * 3.5) / len);
+    const cx = sg[1] + (sg[3] - sg[1]) * f, cy = sg[2] + (sg[4] - sg[2]) * f;
+    v = { w, h, x: cx - w / 2, y: cy - h / 2 };
+    clamp(); apply();
+  };
+  wrap._fit = () => { v = { x: base[0], y: base[1], w: base[2], h: base[3] }; apply(); };
+  ui.onclick = (e) => {
+    const b = e.target.closest('[data-z]');
+    if (!b) return;
+    if (b.dataset.z === 'in') { const c = nearest(...center()); zoomAt(1.6, ...c); const [nx2, ny2] = c; v.x = nx2 - v.w / 2; v.y = ny2 - v.h / 2; clamp(); apply(); }
+    if (b.dataset.z === 'out') zoomAt(1 / 1.6, ...center());
+    if (b.dataset.z === 'fit') wrap._fit();
+  };
+  svg.addEventListener('wheel', (e) => {
+    // Csak csippentés (trackpad) vagy ctrl + görgő nagyít; a sima görgetés az oldalt görgeti.
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    zoomAt(Math.exp(-e.deltaY * 0.01), ...toSvg(e.clientX, e.clientY));
+  }, { passive: false });
+  svg.addEventListener('dblclick', (e) => zoomAt(2, ...toSvg(e.clientX, e.clientY)));
+  const ptrs = new Map();
+  let last = null;
+  svg.addEventListener('pointerdown', (e) => { ptrs.set(e.pointerId, [e.clientX, e.clientY]); svg.setPointerCapture?.(e.pointerId); last = null; });
+  svg.addEventListener('pointermove', (e) => {
+    if (!ptrs.has(e.pointerId)) return;
+    const prev = ptrs.get(e.pointerId);
+    ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+    const r = svg.getBoundingClientRect();
+    if (ptrs.size === 1 && base[2] / v.w > 1.01) {
+      v.x -= ((e.clientX - prev[0]) / r.width) * v.w; v.y -= ((e.clientY - prev[1]) / r.height) * v.h;
+      clamp(); apply();
+    } else if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      const dist = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      if (last) zoomAt(dist / last, ...toSvg((a[0] + b[0]) / 2, (a[1] + b[1]) / 2));
+      last = dist;
+    }
+  });
+  const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) last = null; };
+  svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', up);
+  apply();
+}
+
+function renderTopView(highlight = null) {
+  const box = $('.topview-wrap');
+  if (!box || !js.detail) return;
+  const size = tvSize();
+  box._draw = (zoom) => topView(js.detail.stages, { highlight: js.hover ?? null, ...size, zoom });
+  box.innerHTML = `${topView(js.detail.stages, { highlight, ...size })}
+    <div class="tv-ui"><div class="tv-scale"><i></i><span></span></div>
+      <div class="tv-btns"><button type="button" data-z="fit" title="Teljes nézet">⤢</button><button type="button" data-z="out" aria-label="Kicsinyítés">−</button><button type="button" data-z="in" aria-label="Nagyítás">+</button></div></div>`;
+  enableZoom(box);
 }
 
 // ===================================================================
@@ -238,7 +409,7 @@ async function showJob(id, scroll) {
     <span>Középoszlop <b>${t.kozep}</b></span>`;
   const doneTotal = s.stages.reduce((a, x) => a + x.done_m, 0);
   const pctAll = t.m ? Math.round((doneTotal / t.m) * 100) : 0;
-  $('#jd-overview').innerHTML = s.stages.length ? `<div class="topview-wrap">${topView(s.stages, { highlight: js.hover ?? null, ...tvSize() })}</div>
+  $('#jd-overview').innerHTML = s.stages.length ? `<div class="topview-wrap"></div>
     <div class="tv-legend"><span><i class="lg tv-grey"></i>hátra van: <b>${fmt(t.m - doneTotal, 0)} m</b></span><span><i class="lg tv-red"></i>kész: <b>${fmt(doneTotal, 0)} m</b> (${pctAll}%)</span></div>` : '';
 
   $('#jd-stages').innerHTML = s.stages.map((x, i) => {
@@ -254,6 +425,7 @@ async function showJob(id, scroll) {
     </div>`;
   }).join('') || '<p class="muted">Még nincs szakasz. Add hozzá az elsőt: hossz, minta, és hogy merre fordul az előzőhöz képest.</p>';
   $('#jd-legend').innerHTML = '';
+  renderTopView();
 
   $('#jd-summary tbody').innerHTML = s.summary.map((x) => `<tr><td>${esc(x.item)}</td><td class="num">${x.needed}</td>
     <td class="num">${x.in_stock}</td><td class="num ${x.missing ? 'neg' : ''}">${x.missing}</td></tr>`).join('')
@@ -308,9 +480,20 @@ $('#jd-stages').addEventListener('mouseover', (e) => {
   const id = r ? +r.dataset.stage : null;
   if (id === js.hover || !js.detail) return;
   js.hover = id;
-  $('.topview-wrap').innerHTML = topView(js.detail.stages, { highlight: id, ...tvSize() });
+  hl(id);
 });
-$('#jd-stages').addEventListener('mouseleave', () => { js.hover = null; if (js.detail?.stages.length) $('.topview-wrap').innerHTML = topView(js.detail.stages, tvSize()); });
+$('#jd-stages').addEventListener('mouseleave', () => { js.hover = null; hl(null); });
+// Kiemelés a nagyítás megtartásával: csak az átlátszóságot állítjuk.
+function hl(id) {
+  $$('.topview-wrap svg [data-sid]').forEach((g) => g.setAttribute('opacity', id === null || +g.dataset.sid === id ? '1' : '.28'));
+}
+// Szakaszra koppintva a térkép ráközelít.
+$('#jd-stages').addEventListener('click', (e) => {
+  if (e.target.closest('button')) return;
+  const r = e.target.closest('[data-stage]');
+  const w = $('.topview-wrap');
+  if (r && w?._zoomTo) { w._zoomTo(+r.dataset.stage); w.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+});
 $$('[data-close-dialog]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 
 $('#job-form').addEventListener('submit', async (e) => {

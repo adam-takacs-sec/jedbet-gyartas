@@ -254,7 +254,7 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>Telek és kerítés</h2><div class="row-btns wrap" id="plot-tools"></div></div>
+          <div class="card-head"><h2>Kerítés</h2><div class="row-btns wrap" id="plot-tools"></div></div>
           <div class="plot-view" id="plot-view"></div>
           <p class="muted small" id="plot-hint"></p>
           <div class="card-head stage-list-head"><h3>Szakaszok</h3><button class="btn primary sm" type="button" id="stage-new">+ Szakasz</button></div>
@@ -306,7 +306,8 @@
         <div class="card-head"><h2 id="stage-dialog-title">Új szakasz</h2><button class="btn sm" type="button" data-close-dialog>Mégse</button></div>
         <div class="form2">
           <label class="full">Szakasz neve<input name="stage_name" required maxlength="120" placeholder="pl. Utcafront"></label>
-          <label class="full" data-for="side">Telek oldala<select name="side" id="stage-side"></select></label>
+          <label class="full" data-for="side">Telek oldala (nem kötelező)<select name="side" id="stage-side"></select></label>
+          <label class="full" data-for="turn">Merre megy az előző szakasz végétől?<select name="turn" id="stage-turn"></select></label>
           <label data-for="from">Kezdés az oldal elejétől (m)<input name="from_m" type="number" inputmode="decimal" step="any" min="0" value="0"></label>
           <label>Hossz (m)<input name="length_m" type="number" inputmode="decimal" step="any" min="0.5" required></label>
           <label>Minta<select name="template" id="stage-template"></select></label>

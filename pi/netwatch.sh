@@ -14,11 +14,14 @@ IFACE=${IFACE:-wlan0}
 log() { logger -t jedbet-netwatch "$*"; }
 
 online() {
-  # Az alapértelmezett átjáró pingje, és hogy a jedbet.xyz feloldható-e.
-  local gw
-  gw=$(ip route | awk '/^default/ {print $3; exit}')
-  [ -n "$gw" ] && ping -c1 -W3 "$gw" >/dev/null 2>&1 || return 1
-  getent hosts jedbet.xyz >/dev/null 2>&1 || ping -c1 -W3 1.1.1.1 >/dev/null 2>&1
+  # Akkor van net, ha a jedbet.xyz elérhető (bármilyen HTTP-válasz jó), vagy legalább az 1.1.1.1 pingelhető.
+  # Az átjárót szándékosan nem pingeljük: sok router nem válaszol pingre, az hamis riasztás lenne.
+  if command -v curl >/dev/null 2>&1; then
+    curl -s -o /dev/null --max-time 10 https://jedbet.xyz/ && return 0
+  else
+    python3 -c 'import urllib.request as u; u.urlopen("https://jedbet.xyz/", timeout=10)' >/dev/null 2>&1 && return 0
+  fi
+  ping -c1 -W3 1.1.1.1 >/dev/null 2>&1
 }
 
 fails=$(cat "$STATE" 2>/dev/null || echo 0)

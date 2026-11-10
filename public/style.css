@@ -547,3 +547,16 @@ label { font-weight: 600; }
   .stage-row .band-done { flex: 1 1 auto; text-align: left; padding-left: 34px; }
   .stage-row .row-btns { margin-left: auto; }
 }
+.add-dir { cursor: pointer; }
+.add-dir circle { fill: #2c3035; stroke: var(--red); stroke-width: 1.5; }
+.add-dir text { fill: #fff; font-size: 15px; font-weight: 800; pointer-events: none; }
+.add-dir:hover circle { fill: var(--red); }
+[data-stage-g].sel rect[data-hit] { fill: rgba(255,255,255,.07); }
+.plot-view { overflow: visible; }
+.pv-pop { position: absolute; z-index: 5; transform: translate(-50%, -100%); width: 250px; padding: 10px 12px; border-radius: 10px;
+  background: #23262a; border: 1px solid var(--line); box-shadow: 0 8px 24px rgba(0,0,0,.45); display: grid; gap: 6px; }
+.pv-pop.below { transform: translate(-50%, 0); }
+.pv-pop-h { display: flex; align-items: center; gap: 8px; }
+.pv-pop-h b { flex: 1; }
+.pv-x { background: none; border: 0; color: var(--muted); font-size: 1rem; cursor: pointer; }
+.pv-pop .btn.sm { min-height: 34px; }

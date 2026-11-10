@@ -11,7 +11,6 @@ try { js.filter = localStorage.getItem('jobFilter') ?? 'Aktív'; } catch {}
 
 const RED = '#d62828';
 const TPL_ACCENT = { 'Mediterrán': '#d4a72c', 'Homokkő': '#c06b3e', 'Hullám': '#3d8fd1' };
-const TURNS = [[90, 'Jobbra fordul (derékszög)'], [-90, 'Balra fordul (derékszög)'], [0, 'Egyenesen tovább'], [45, 'Jobbra, ferdén (45°)'], [-45, 'Balra, ferdén (45°)']];
 const SIDE = (i) => String.fromCharCode(65 + (i % 26)) + (i >= 26 ? Math.floor(i / 26) : '');
 
 // 2 m = 1 oszlopköz = 4 panel; szakaszonként 2 végoszlop (ugyanaz, mint a szerveren).
@@ -47,25 +46,68 @@ function sides(plot, pts = plotPoints(plot)) {
   });
 }
 
-// Telek nélkül: a szakaszok egymás után, mindegyik az előző végétől, a megadott fordulással (+ = jobbra).
-function chainSides(stages) {
-  let x = 0, y = 0, h = 0;
-  const raw = stages.map((st, i) => {
-    if (i > 0) h += Number(st.turn ?? 90);
-    const r = (h * Math.PI) / 180, dx = Math.cos(r), dy = Math.sin(r);
-    const a = [x, y], b = [x + dx * st.length_m, y + dy * st.length_m];
-    x = b[0]; y = b[1];
-    return { i, a, b, geo: st.length_m, len: st.length_m, dx, dy };
-  });
-  const all = raw.flatMap((s) => [s.a, s.b]);
-  const c = all.reduce((a, p) => [a[0] + p[0] / all.length, a[1] + p[1] / all.length], [0, 0]);
-  return raw.map((s) => {
-    let nx = -s.dy, ny = s.dx;
-    const mid = lerp(s.a, s.b, 0.5);
+// Irányok (abszolút): 0 = jobbra, 90 = le, 180 = balra, 270 = fel; ferdék 45°-onként.
+const DIRS = [[0, '→ Jobbra'], [90, '↓ Le'], [180, '← Balra'], [270, '↑ Fel'], [315, '↗ Jobbra fel'], [45, '↘ Jobbra le'], [135, '↙ Balra le'], [225, '↖ Balra fel']];
+const ARROW = { 0: '→', 90: '↓', 180: '←', 270: '↑', 45: '↘', 135: '↙', 225: '↖', 315: '↗' };
+const dirLabel = (h) => (DIRS.find(([v]) => v === ((Math.round(h) % 360) + 360) % 360) || [0, `${Math.round(h)}°`])[1];
+const near = (p, q) => Math.abs(p[0] - q[0]) < 0.05 && Math.abs(p[1] - q[1]) < 0.05;
+
+// Hol fut az egyes szakasz: telekoldalon (ha ahhoz van kötve), különben a kezdőponttól vagy egy másik
+// szakasz végétől, a megadott irányba. Régi szakasznál (nincs irány) az előző végétől, fordulással.
+function layoutStages(stages, sd) {
+  const place = {};
+  let legacyH = null, prev = null;
+  const todo = [...stages];
+  for (let pass = 0; pass < 3 && todo.length; pass++) {
+    for (let i = 0; i < todo.length; i++) {
+      const st = todo[i];
+      let seg = null;
+      if (sd[st.side]) {
+        const x = sd[st.side];
+        const scale = x.geo / x.len;
+        const a = lerp(x.a, x.b, Math.min(1, st.from_m / x.len));
+        seg = { a, b: [a[0] + x.dx * st.length_m * scale, a[1] + x.dy * st.length_m * scale], dx: x.dx, dy: x.dy, scale };
+      } else {
+        let start = [0, 0], h = st.heading;
+        if (st.anchor_id) {
+          const an = place[st.anchor_id];
+          if (!an) continue; // a horgony még nincs elhelyezve; következő körben
+          start = st.anchor_end === 'start' ? an.a : an.b;
+        } else if (h === null || h === undefined) {
+          start = prev ? prev.b : [0, 0];
+        }
+        if (h === null || h === undefined) { legacyH = legacyH === null ? 0 : legacyH + Number(st.turn ?? 90); h = legacyH; }
+        const r = (h * Math.PI) / 180, dx = Math.cos(r), dy = Math.sin(r);
+        seg = { a: start, b: [start[0] + dx * st.length_m, start[1] + dy * st.length_m], dx, dy, scale: 1 };
+      }
+      seg.heading = ((Math.round((Math.atan2(seg.dy, seg.dx) * 180) / Math.PI) % 360) + 360) % 360;
+      place[st.id] = seg; prev = seg;
+      todo.splice(i, 1); i--;
+    }
+  }
+  // Kifelé mutató normálisok (a rajz közepétől el)
+  const all = Object.values(place).flatMap((x) => [x.a, x.b]);
+  const c = all.length ? all.reduce((a, p) => [a[0] + p[0] / all.length, a[1] + p[1] / all.length], [0, 0]) : [0, 0];
+  for (const x of Object.values(place)) {
+    let nx = -x.dy, ny = x.dx;
+    const mid = lerp(x.a, x.b, 0.5);
     if ((mid[0] + nx - c[0]) ** 2 + (mid[1] + ny - c[1]) ** 2 < (mid[0] - nx - c[0]) ** 2 + (mid[1] - ny - c[1]) ** 2) { nx = -nx; ny = -ny; }
-    if (raw.length === 1) { nx = 0; ny = -1; }
-    return { ...s, nx, ny };
-  });
+    if (all.length <= 2) { nx = Math.abs(x.dy) > 0.5 ? 1 : 0; ny = Math.abs(x.dy) > 0.5 ? 0 : -1; }
+    Object.assign(x, { nx, ny });
+  }
+  return place;
+}
+
+// Szabad végek (ahol csak egy szakasz ér véget): ide lehet új szakaszt kezdeni.
+function freeEnds(stages, place) {
+  const ends = [];
+  for (const st of stages) {
+    const x = place[st.id];
+    if (!x) continue;
+    ends.push({ p: x.a, id: st.id, end: 'start', into: x.heading });
+    ends.push({ p: x.b, id: st.id, end: 'end', into: (x.heading + 180) % 360 });
+  }
+  return ends.filter((e) => ends.filter((o) => near(o.p, e.p)).length === 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -91,27 +133,22 @@ function plotView(W) {
   const hasPlot = edit || plotPoints(js.job.plot).length >= 3;
   const pts = edit ? js.draft : hasPlot ? plotPoints(js.job.plot) : [];
   const sd = hasPlot ? sides(edit ? { unit: 'm' } : js.job.plot, pts) : [];
-  // Melyik szakasz hol fut: telekoldalon, vagy (telek nélkül) egymás után láncolva, a megadott fordulással.
-  const place = {};
   const stagesAll = edit ? [] : js.detail.stages;
-  if (hasPlot) {
-    for (const st of stagesAll) if (sd[st.side]) place[st.id] = { s: sd[st.side], from: st.from_m };
-  } else {
-    const chain = chainSides(stagesAll);
-    stagesAll.forEach((st, i) => { place[st.id] = { s: chain[i], from: 0 }; });
-  }
-  const geoPts = hasPlot ? pts : Object.values(place).flatMap((x) => [x.s.a, x.s.b]);
+  const place = layoutStages(stagesAll, sd);
+  const ends = edit ? [] : stagesAll.length ? freeEnds(stagesAll, place) : [{ p: [0, 0], id: null, end: 'end', into: null }];
+  const geoPts = [...pts, ...Object.values(place).flatMap((x) => [x.a, x.b]), ...ends.map((e) => e.p)];
   if (!geoPts.length) return '';
+  if (geoPts.length === 1) geoPts.push([geoPts[0][0] - 8, geoPts[0][1] - 5], [geoPts[0][0] + 8, geoPts[0][1] + 5]);
   const xs = geoPts.map((p) => p[0]), ys = geoPts.map((p) => p[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
   // Telefonon a címkék a telek belsejébe kerülnek, így kevés margó is elég, és nagyobb a rajz.
   const narrow = W < 600, inSide = narrow ? -1 : 1;
-  const pad = narrow ? 22 : 84;
+  const pad = narrow ? 46 : 84;
   const maxH = W < 600 ? 520 : 600;
   const k = Math.min((W - 2 * pad) / Math.max(maxX - minX, 1), (maxH - 2 * pad) / Math.max(maxY - minY, 1), 40);
   const H = Math.max(220, (maxY - minY) * k + 2 * pad);
   const ox = (W - (maxX - minX) * k) / 2 - minX * k, oy = (H - (maxY - minY) * k) / 2 - minY * k;
-  js.view = { k, ox, oy, sd, pts, place };
+  js.view = { k, ox, oy, sd, pts, place, W, H };
   const X = (p) => ox + p[0] * k, Y = (p) => oy + p[1] * k;
   const XY = (p) => `${X(p).toFixed(1)},${Y(p).toFixed(1)}`;
   let g = '';
@@ -131,15 +168,14 @@ function plotView(W) {
   // Kerítés a szakaszok szerint
   const S = Math.max(6, Math.min(16, k * 0.45)), t = S * 0.34;
   stagesAll.forEach((st, idx) => {
-    const pl = place[st.id];
-    if (!pl) return;
-    const sdx = pl.s;
-    const scale = sdx.geo / sdx.len; // ha a valós hossz el van térítve a rajzolttól
-    const start = lerp(sdx.a, sdx.b, Math.min(1, pl.from / sdx.len));
+    const sdx = place[st.id];
+    if (!sdx) return;
+    const scale = sdx.scale; // ha a valós oldalhossz el van térítve a rajzolttól
+    const start = sdx.a;
     const L = st.length_m, done = Math.min(st.done_m, L), spans = Math.max(1, Math.ceil(L / 2 - 1e-9));
     const rot = (Math.atan2(sdx.dy, sdx.dx) * 180) / Math.PI;
     const px = (m) => m * scale * k;
-    let f = `<g data-stage-g="${st.id}" transform="translate(${X(start).toFixed(1)} ${Y(start).toFixed(1)}) rotate(${rot.toFixed(2)})">`;
+    let f = `<g data-stage-g="${st.id}" class="${js.sel && js.sel !== st.id ? 'dim' : js.sel === st.id ? 'sel' : ''}" transform="translate(${X(start).toFixed(1)} ${Y(start).toFixed(1)}) rotate(${rot.toFixed(2)})">`;
     f += `<rect data-hit="${st.id}" x="0" y="-16" width="${px(L).toFixed(1)}" height="32" fill="transparent" style="cursor:pointer"/>`;
     for (let j = 0; j < spans; j++) {
       const d0 = j * 2, d1 = Math.min(L, (j + 1) * 2);
@@ -162,11 +198,16 @@ function plotView(W) {
     const mid = lerp(start, [start[0] + sdx.dx * L * scale, start[1] + sdx.dy * L * scale], 0.5);
     const txt = done > 0 && done < L ? `${m1(done)}/${m1(L)} m` : `${m1(L)} m`;
     // Az oldal címkéje mögé, kifelé (a címkék szélességét a normális irányában számolva).
-    const sideW = 30 + `${m1(sdx.len)} m`.length * 6.5;
-    const off = (hasPlot ? 14 + 2 * ext(sdx, sideW) + 6 : 16) + ext(sdx, 34 + txt.length * 7.2);
+    const onSide = sd[st.side];
+    const sideW = onSide ? 30 + `${m1(onSide.len)} m`.length * 6.5 : 0;
+    const off = (onSide ? 14 + 2 * ext(sdx, sideW) + 6 : 16) + ext(sdx, 34 + txt.length * 7.2);
     const lx = X(mid) + sdx.nx * off * inSide, ly = Y(mid) + sdx.ny * off * inSide;
     const cls = done >= L - 1e-6 ? 'ok' : done > 0 ? 'part' : '';
-    g += pill(lx, ly, `<i>${idx + 1}</i>${txt}`, `stage ${cls}`);
+    if (narrow) {
+      // Telefonon csak a sorszám, a szakasz közepén a kerítésen (a részletek koppintásra / a listában).
+      g += `<g pointer-events="none" transform="translate(${X(mid).toFixed(1)} ${Y(mid).toFixed(1)})"><circle r="10" fill="${cls === 'ok' ? RED : '#2c3035'}" stroke="${cls ? RED : '#fff'}" stroke-width="2"/>
+        <text y="4" text-anchor="middle" font-size="11" font-weight="800" fill="#fff">${idx + 1}</text></g>`;
+    } else g += pill(lx, ly, `<i>${idx + 1}</i>${txt}`, `stage ${cls}`);
   });
 
   // Oldalak címkéi (szerkesztéskor koppintható a pontos hosszhoz)
@@ -189,6 +230,18 @@ function plotView(W) {
       g += `<g data-vtx="${i}" transform="translate(${X(p).toFixed(1)} ${Y(p).toFixed(1)})" style="cursor:move"><circle r="18" fill="transparent"/>
         <rect x="-8" y="-8" width="16" height="16" rx="3" fill="#fff" stroke="${RED}" stroke-width="3"/></g>`;
     });
+  }
+
+  // „+” nyilak a szabad végeken: arra indul az új szakasz.
+  for (const e of ends) {
+    const cx = X(e.p), cy = Y(e.p);
+    for (const h of [0, 90, 180, 270]) {
+      if (e.into !== null && Math.abs(((h - e.into + 540) % 360) - 180) < 45) continue; // arra már szakasz fut
+      const r = (h * Math.PI) / 180, d = e.id ? 30 : 34;
+      g += `<g class="add-dir" data-add-dir="${h}" data-anchor="${e.id ?? ''}" data-anchor-end="${e.end}" transform="translate(${(cx + Math.cos(r) * d).toFixed(1)} ${(cy + Math.sin(r) * d).toFixed(1)})">
+        <circle r="13"/><text y="5" text-anchor="middle">${ARROW[h]}</text></g>`;
+    }
+    if (!e.id) g += `<circle cx="${cx}" cy="${cy}" r="5" fill="${RED}"/>`;
   }
 
   // Lépték
@@ -329,17 +382,32 @@ function renderView() {
   const tools = $('#plot-tools');
   if (js.mode === 'edit') tools.innerHTML = '<button class="btn sm ghost" data-tool="delete" type="button">Telek törlése</button><button class="btn sm" data-tool="cancel" type="button">Mégse</button><button class="btn success sm" data-tool="save" type="button">Mentés</button>';
   else tools.innerHTML = has ? '<button class="btn sm" data-tool="edit" type="button">✎ Telek</button>' : '<button class="btn sm ghost" data-tool="new" type="button">+ Telek (nem kötelező)</button>';
-  if (!stages.length && !has && js.mode !== 'edit') {
-    box.innerHTML = `<div class="pv-empty"><p>Még nincs kerítésszakasz.</p><button class="btn primary" type="button" data-new-stage>+ Szakasz</button>
-      <p class="muted small">Elég a hossz és a minta. A telket csak akkor kell megadni, ha a kerítést a telek oldalaihoz akarod igazítani.</p></div>`;
-    $('#plot-hint').textContent = '';
-    return;
-  }
-  box.innerHTML = plotView(Math.max(300, box.clientWidth)) || '<div class="pv-empty"><p class="muted">Adj hozzá szakaszt a telek egyik oldalához.</p></div>';
-  const unplaced = has && stages.some((x) => !sides(js.job.plot)[x.side]);
+  box.innerHTML = plotView(Math.max(300, box.clientWidth)) + popHtml();
+  const unplaced = has && stages.some((x) => !sides(js.job.plot)[x.side] && !x.anchor_id && (x.heading === null || x.heading === undefined));
   $('#plot-hint').innerHTML = js.mode === 'edit'
     ? 'Húzd a sarkokat (fél méterre ugranak). Oldal pontos hossza: koppints az oldal címkéjére. Új sarok: „+”. Sarok törlése: dupla koppintás a sarokra.'
-    : `A piros pöttyöt húzd a kerítésen, vagy koppints a kerítésre: idáig készült el (2 méterenként ugrik).${unplaced ? ' <span class="neg">Van szakasz, ami nincs a telek egyik oldalához kötve, ezért nem látszik a rajzon.</span>' : ''}`;
+    : !stages.length
+      ? 'Koppints egy nyílra: abba az irányba indul az első szakasz.'
+      : `Új szakasz: a kerítés végén a nyilak. Koppints a kerítésre a szakasz adataiért; a piros pöttyöt húzva állítod, meddig készült el.${unplaced ? ' <span class="neg">Van szakasz, ami nincs a telek egyik oldalához kötve.</span>' : ''}`;
+}
+
+// A kijelölt szakasz kis kártyája a rajzon.
+function popHtml() {
+  const st = js.sel && js.detail.stages.find((x) => x.id === js.sel);
+  const pl = st && js.view?.place[st.id];
+  if (!pl) return '';
+  const { k, ox, oy, W } = js.view;
+  const mid = lerp(pl.a, pl.b, 0.5);
+  const x = Math.min(W - 130, Math.max(130, ox + mid[0] * k)), y = oy + mid[1] * k;
+  const idx = js.detail.stages.indexOf(st) + 1;
+  const below = y < 150;
+  return `<div class="pv-pop ${below ? 'below' : ''}" style="left:${x}px;top:${below ? y + 24 : y - 24}px">
+    <div class="pv-pop-h"><span class="stage-no">${idx}</span><b>${esc(st.stage_name)}</b><button class="pv-x" type="button" data-pop="close" aria-label="Bezárás">✕</button></div>
+    <div class="small muted">${m1(st.length_m)} m · ${esc(st.template)} · ${dirLabel(pl.heading)}</div>
+    <div class="small">Kész: <b>${m1(st.done_m)}</b> / ${m1(st.length_m)} m ${st.manual ? '<span class="chip-s">kézzel</span>' : ''}</div>
+    <div class="row-btns wrap"><button class="btn sm" type="button" data-pop="all">✓ Mind kész</button><button class="btn sm" type="button" data-pop="zero">0</button>
+      <button class="btn sm" type="button" data-pop="edit">✎</button><button class="btn sm ghost" type="button" data-pop="del">✕ Törlés</button></div>
+  </div>`;
 }
 let resizeT;
 window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (!$('#job-detail').hidden && js.detail) renderView(); }, 150); });
@@ -352,10 +420,8 @@ function toMeters(svg, ev) {
 }
 // Egy szakasz mentén mért távolság (m) a ponthoz, 2 m-re kerekítve.
 function alongStage(st, m) {
-  const { s, from } = js.view.place[st.id];
-  const scale = s.geo / s.len;
-  const start = lerp(s.a, s.b, Math.min(1, from / s.len));
-  const d = ((m[0] - start[0]) * s.dx + (m[1] - start[1]) * s.dy) / scale;
+  const s = js.view.place[st.id];
+  const d = ((m[0] - s.a[0]) * s.dx + (m[1] - s.a[1]) * s.dy) / s.scale;
   if (d >= st.length_m - 1) return st.length_m;
   return Math.max(0, Math.min(st.length_m, Math.round(d / 2) * 2));
 }
@@ -364,13 +430,13 @@ $('#plot-view').addEventListener('pointerdown', (e) => {
   const svg = $('#plot-view svg');
   if (!svg) return;
   // Kész jelölő húzása / koppintás a kerítésre
-  const knob = e.target.closest('[data-knob]'), hit = e.target.closest('[data-hit]');
-  if ((knob || hit) && js.mode === 'view') {
+  const knob = e.target.closest('[data-knob]');
+  if (knob && js.mode === 'view') {
     e.preventDefault();
-    const st = js.detail.stages.find((x) => x.id === +(knob ? knob.dataset.knob : hit.dataset.hit));
+    const st = js.detail.stages.find((x) => x.id === +knob.dataset.knob);
     let cur = alongStage(st, toMeters(svg, e));
     const orig = st.done_m;
-    const redraw = () => { st.done_m = cur; $('#plot-view').innerHTML = plotView(Math.max(300, $('#plot-view').clientWidth)); };
+    const redraw = () => { st.done_m = cur; $('#plot-view').innerHTML = plotView(Math.max(300, $('#plot-view').clientWidth)) + popHtml(); };
     redraw();
     const box = $('#plot-view');
     box.setPointerCapture?.(e.pointerId);
@@ -403,13 +469,32 @@ $('#plot-view').addEventListener('pointerdown', (e) => {
     box.addEventListener('pointermove', move); box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
   }
 });
+async function popAction(a) {
+  const st = js.detail.stages.find((x) => x.id === js.sel);
+  if (a === 'close' || !st) { js.sel = null; return renderView(); }
+  if (a === 'edit') return openStage(st);
+  if (a === 'del') {
+    if (!confirm(`Törlöd: ${st.stage_name}?`)) return;
+    await api(`/api/stages/${st.id}`, { method: 'DELETE' }); js.sel = null; toast('Törölve'); return loadJobs();
+  }
+  const v = a === 'all' ? st.length_m : 0;
+  await api(`/api/stages/${st.id}`, { method: 'PATCH', body: { done_manual: v } });
+  toast(`${st.stage_name}: ${m1(v)} m kész`); loadJobs();
+}
 $('#plot-view').addEventListener('dblclick', (e) => {
   const v = e.target.closest('[data-vtx]');
   if (v && js.mode === 'edit' && js.draft.length > 3) { js.draft.splice(+v.dataset.vtx, 1); renderView(); }
 });
 $('#plot-view').addEventListener('click', (e) => {
-  if (e.target.closest('[data-new-stage]')) return openStage(null);
-  if (js.mode !== 'edit') return;
+  if (js.mode !== 'edit') {
+    const ad = e.target.closest('[data-add-dir]');
+    if (ad) return openStage(null, null, { heading: +ad.dataset.addDir, anchor_id: ad.dataset.anchor ? +ad.dataset.anchor : null, anchor_end: ad.dataset.anchorEnd });
+    const pop = e.target.closest('[data-pop]');
+    if (pop) return popAction(pop.dataset.pop);
+    const hit = e.target.closest('[data-hit]');
+    js.sel = hit ? (js.sel === +hit.dataset.hit ? null : +hit.dataset.hit) : e.target.closest('.pv-pop') ? js.sel : null;
+    return renderView();
+  }
   const add = e.target.closest('[data-add]');
   if (add) { const i = +add.dataset.add, n = js.draft.length; const mid = lerp(js.draft[i], js.draft[(i + 1) % n], 0.5); js.draft.splice(i + 1, 0, mid.map((x) => Math.round(x * 2) / 2)); return renderView(); }
   const sl = e.target.closest('[data-side-len]');
@@ -467,8 +552,8 @@ function renderStageList() {
   const sd = sides(js.job.plot);
   $('#stage-list').innerHTML = js.detail.stages.map((x, i) => {
     const side = sd[x.side];
-    const turnTxt = i > 0 ? (TURNS.find(([v]) => v === Number(x.turn)) || [0, `${x.turn}°`])[1].toLowerCase().replace(' (derékszög)', '') : 'kezdő szakasz';
-    const pos = side ? `${SIDE(x.side)} oldal · ${m1(x.from_m)}–${m1(x.from_m + x.length_m)} m` : sd.length ? '<span class="neg">nincs telek-oldalhoz kötve</span>' : turnTxt;
+    const pl = js.view?.place?.[x.id];
+    const pos = side ? `${SIDE(x.side)} oldal · ${m1(x.from_m)}–${m1(x.from_m + x.length_m)} m` : pl ? dirLabel(pl.heading) : '';
     const pct = Math.round((x.done_m / x.length_m) * 100);
     const over = side && x.from_m + x.length_m > side.len + 0.5;
     return `<div class="stage-row" data-stage="${x.id}">
@@ -488,6 +573,8 @@ $('#stage-list').addEventListener('click', async (e) => {
   if (auto) { await api(`/api/stages/${auto.dataset.auto}`, { method: 'PATCH', body: { done_manual: null } }); toast('Visszaállítva a napi lap szerint'); loadJobs(); }
   if (ed) openStage(js.detail.stages.find((x) => x.id === +ed.dataset.editStage));
   if (del && confirm('Törlöd a szakaszt?')) { await api(`/api/stages/${del.dataset.delStage}`, { method: 'DELETE' }); loadJobs(); }
+  const row = e.target.closest('[data-stage]');
+  if (row && !e.target.closest('button')) { js.sel = +row.dataset.stage; renderView(); $('#plot-view').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 });
 $('#stage-list').addEventListener('mouseover', (e) => {
   const r = e.target.closest('[data-stage]');
@@ -519,7 +606,11 @@ $('#job-detail').addEventListener('click', async (e) => {
     toast(j.status === 'Aktív' ? 'Befejezettnek jelölve' : 'Újranyitva'); loadJobs();
   }
 });
-$('#stage-new').addEventListener('click', () => openStage(null));
+$('#stage-new').addEventListener('click', () => {
+  // Folytatás az utolsó szakasz végétől, ugyanabba az irányba (a nézet nyilaival bármerre lehet).
+  const last = js.detail.stages.at(-1), pl = last && js.view?.place?.[last.id];
+  openStage(null, null, pl ? { heading: pl.heading, anchor_id: last.id, anchor_end: 'end' } : { heading: 0, anchor_id: null, anchor_end: 'end' });
+});
 $$('[data-close-dialog]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 
 $('#job-form').addEventListener('submit', async (e) => {
@@ -541,15 +632,17 @@ $('#job-form').addEventListener('submit', async (e) => {
 function freeFrom(side, exceptId) {
   return js.detail.stages.filter((x) => x.side === side && x.id !== exceptId).reduce((a, x) => Math.max(a, x.from_m + x.length_m), 0);
 }
-function openStage(st, side = null) {
+function openStage(st, side = null, anchor = null) {
   js.editingStage = st;
+  js.newAnchor = anchor;
   const f = $('#stage-form'); f.reset();
   const sd = sides(js.job.plot);
   $('#stage-side').innerHTML = '<option value="">— nincs telek-oldalhoz kötve —</option>' +
     sd.map((x) => `<option value="${x.i}">${SIDE(x.i)} oldal · ${m1(x.len)} m</option>`).join('');
   f.querySelector('[data-for="side"]').hidden = !sd.length;
-  $('#stage-turn').innerHTML = TURNS.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
-  f.turn.value = String(st?.turn ?? 90);
+  $('#stage-turn').innerHTML = DIRS.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
+  const curH = st ? js.view?.place?.[st.id]?.heading ?? st.heading ?? 0 : anchor?.heading ?? 0;
+  f.heading.value = String(((Math.round(curH / 45) * 45) % 360 + 360) % 360);
   $('#stage-dialog-title').textContent = st ? 'Szakasz szerkesztése' : 'Új szakasz';
   f.querySelector('[type=submit]').textContent = st ? 'Mentés' : 'Hozzáadás';
   if (st) {
@@ -557,7 +650,7 @@ function openStage(st, side = null) {
     f.note.value = st.note || ''; f.side.value = st.side ?? ''; f.from_m.value = st.from_m || 0;
   } else {
     if (js.detail.stages.length) f.template.value = js.detail.stages.at(-1).template;
-    const s0 = side ?? (sd.length ? sd.findIndex((x) => freeFrom(x.i) < x.len - 0.5) : -1);
+    const s0 = side ?? -1;
     if (s0 !== null && s0 >= 0) {
       f.side.value = s0;
       const from = freeFrom(s0);
@@ -573,8 +666,7 @@ function previewStage() {
   const f = $('#stage-form');
   f.querySelector('[data-for="from"]').hidden = f.side.value === '';
   // Telek nélkül (vagy oldal nélkül) a szakasz az előző végétől folytatódik; az elsőnél nincs fordulás.
-  const isFirst = js.editingStage ? js.detail.stages[0]?.id === js.editingStage.id : !js.detail.stages.length;
-  f.querySelector('[data-for="turn"]').hidden = f.side.value !== '' || isFirst || sides(js.job.plot).length > 0;
+  f.querySelector('[data-for="turn"]').hidden = f.side.value !== '';
   const len = parseFloat(String(f.length_m.value).replace(',', '.'));
   const box = $('#stage-preview');
   if (!(len >= 0.5)) { box.innerHTML = '<p class="muted small">Add meg a hosszt.</p>'; return; }
@@ -603,6 +695,7 @@ $('#stage-form').addEventListener('submit', async (e) => {
   v.length_m = String(v.length_m).replace(',', '.');
   v.from_m = String(v.from_m || 0).replace(',', '.');
   if (v.side === undefined) v.side = '';
+  if (!js.editingStage && js.newAnchor) { v.anchor_id = js.newAnchor.anchor_id ?? ''; v.anchor_end = js.newAnchor.anchor_end || 'end'; }
   if (js.editingStage) await api(`/api/stages/${js.editingStage.id}`, { method: 'PATCH', body: v });
   else await api(`/api/jobs/${js.selected}/stages`, { method: 'POST', body: v });
   $('#stage-dialog').close(); toast('Mentve'); loadJobs();

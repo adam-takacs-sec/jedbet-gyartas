@@ -406,7 +406,7 @@ async function routeApi(request, env, url, user) {
     const [{ results }, { results: stages }, { results: sums }] = await db.batch([
       db.prepare(`SELECT j.*, (SELECT COALESCE(SUM(length_m),0) FROM job_stages WHERE job_id = j.id) AS total_m
        FROM jobs j ORDER BY (j.status = 'Aktív') DESC, j.id DESC`),
-      db.prepare('SELECT id, job_id, stage_name, length_m, template, turn, side, from_m, done_manual FROM job_stages ORDER BY id'),
+      db.prepare('SELECT id, job_id, stage_name, length_m, template, turn, side, from_m, done_manual, heading, anchor_id, anchor_end FROM job_stages ORDER BY id'),
       db.prepare(`${DONE_SQL} GROUP BY job_id, stage_id`),
     ]);
     return json(results.map((j) => {
@@ -439,9 +439,10 @@ async function routeApi(request, env, url, user) {
   if ((r = p.match(/^\/api\/jobs\/(\d+)\/stages$/)) && m === 'POST') {
     const b = await body(request);
     const v = stageFields(b, {});
-    await db.prepare(`INSERT INTO job_stages (job_id, stage_name, length_m, template, note, turn, side, from_m)
-      VALUES (?,?,?,?,?,?,?,?)`).bind(+r[1], v.stage_name, v.length_m, v.template, v.note, v.turn, v.side, v.from_m).run();
-    return json({ ok: true });
+    const row = await db.prepare(`INSERT INTO job_stages (job_id, stage_name, length_m, template, note, turn, side, from_m, heading, anchor_id, anchor_end)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id`).bind(+r[1], v.stage_name, v.length_m, v.template, v.note, v.turn, v.side, v.from_m,
+      v.heading, v.anchor_id, v.anchor_end).first();
+    return json({ ok: true, stage_id: row.id });
   }
   // Részleges módosítás: csak a megadott mezők változnak (pl. csak a kézi „idáig kész”).
   if ((r = p.match(/^\/api\/stages\/(\d+)$/)) && m === 'PATCH') {
@@ -453,11 +454,16 @@ async function routeApi(request, env, url, user) {
       v.done_manual = b.done_manual === null || b.done_manual === '' ? null : num(b.done_manual, 'kész hossz', { min: 0, max: 5000 });
       if (v.done_manual !== null) v.done_manual = Math.min(v.done_manual, v.length_m);
     } else v.done_manual = cur.done_manual;
-    await db.prepare(`UPDATE job_stages SET stage_name = ?, length_m = ?, template = ?, note = ?, turn = ?, side = ?, from_m = ?, done_manual = ?
-      WHERE id = ?`).bind(v.stage_name, v.length_m, v.template, v.note, v.turn, v.side, v.from_m, v.done_manual, cur.id).run();
+    if (v.anchor_id === cur.id) v.anchor_id = null;
+    await db.prepare(`UPDATE job_stages SET stage_name = ?, length_m = ?, template = ?, note = ?, turn = ?, side = ?, from_m = ?, done_manual = ?,
+      heading = ?, anchor_id = ?, anchor_end = ? WHERE id = ?`).bind(v.stage_name, v.length_m, v.template, v.note, v.turn, v.side, v.from_m,
+      v.done_manual, v.heading, v.anchor_id, v.anchor_end, cur.id).run();
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/stages\/(\d+)$/)) && m === 'DELETE') {
+    const del = await db.prepare('SELECT * FROM job_stages WHERE id = ?').bind(+r[1]).first();
+    if (del) await db.prepare('UPDATE job_stages SET anchor_id = ?, anchor_end = ? WHERE anchor_id = ?')
+      .bind(del.anchor_id, del.anchor_end, del.id).run();
     await db.batch([
       db.prepare('UPDATE tasks SET stage_id = NULL WHERE stage_id = ?').bind(+r[1]),
       db.prepare('DELETE FROM job_stages WHERE id = ?').bind(+r[1]),
@@ -627,6 +633,9 @@ function stageFields(b, cur) {
     turn: num(pick('turn'), 'fordulás', { min: -180, max: 180, def: 90 }),
     side: side === null || side === '' || side === undefined ? null : num(side, 'oldal', { min: 0, max: 59 }),
     from_m: num(pick('from_m'), 'kezdés', { min: 0, max: 5000, def: 0 }),
+    heading: pick('heading') === null || pick('heading') === '' || pick('heading') === undefined ? null : ((num(pick('heading'), 'irány', { min: -360, max: 720 }) % 360) + 360) % 360,
+    anchor_id: pick('anchor_id') === null || pick('anchor_id') === '' || pick('anchor_id') === undefined ? null : num(pick('anchor_id'), 'csatlakozás', { min: 1 }),
+    anchor_end: pick('anchor_end') === 'start' ? 'start' : 'end',
   };
 }
 const DONE_SQL = `SELECT job_id, stage_id, SUM(done_qty) AS m FROM tasks WHERE kind = 'telepites' AND done_qty IS NOT NULL`;

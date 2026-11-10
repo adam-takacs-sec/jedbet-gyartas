@@ -6,7 +6,6 @@
   <meta name="robots" content="noindex, nofollow" />
   <title>JEDBET Gyártás</title>
   <link rel="icon" href="/JEDBET-pecset-sotet.svg" />
-  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -255,24 +254,24 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>Telek</h2><div class="row-btns wrap" id="plot-tools"></div></div>
-          <div class="map-wrap">
-            <form class="map-search" id="map-search" autocomplete="off">
-              <input name="q" placeholder="Cím keresése, pl. Bana, Petőfi u. 20" aria-label="Cím keresése">
-              <button class="btn sm" type="submit">Keres</button>
-              <div class="map-results" id="map-results" hidden></div>
-            </form>
-            <div id="plot-map" class="plot-map"></div>
-            <div class="map-hint" id="map-hint" hidden></div>
-          </div>
-          <div id="plot-sides" class="sides"></div>
+          <div class="card-head"><h2>Telek és kerítés</h2><div class="row-btns wrap" id="plot-tools"></div></div>
+          <div class="plot-view" id="plot-view"></div>
+          <p class="muted small" id="plot-hint"></p>
+          <div class="card-head stage-list-head"><h3>Szakaszok</h3><button class="btn primary sm" type="button" id="stage-new">+ Szakasz</button></div>
+          <div id="stage-list"></div>
         </div>
 
-        <div class="card">
-          <div class="card-head"><h2>Szakaszok</h2><button class="btn primary sm" type="button" id="stage-new">+ Szakasz</button></div>
-          <div id="jd-bands"></div>
-          <p class="muted small" id="bands-hint"></p>
-        </div>
+        <dialog id="plot-dialog" class="dialog narrow" aria-labelledby="plot-dialog-title">
+          <form id="plot-form">
+            <div class="card-head"><h2 id="plot-dialog-title">Telek megadása</h2><button class="btn sm" type="button" data-close-dialog>Mégse</button></div>
+            <p class="muted small">Indulásnak egy téglalap; utána a sarkokat húzhatod, és az oldalak hosszát pontosan beírhatod.</p>
+            <div class="form2">
+              <label>Utcafront (m)<input name="w" type="number" inputmode="decimal" step="any" min="1" required></label>
+              <label>Mélység (m)<input name="h" type="number" inputmode="decimal" step="any" min="1" required></label>
+            </div>
+            <button class="btn primary big" type="submit">Létrehozás</button>
+          </form>
+        </dialog>
 
         <div class="grid2">
           <div class="card">
@@ -355,7 +354,6 @@
 
   <script src="/vendor/qrcode.js"></script>
   <script src="/vendor/chart.umd.js"></script>
-  <script src="/vendor/leaflet/leaflet.js"></script>
   <script src="/app.js" type="module"></script>
 </body>
 </html>

@@ -519,3 +519,31 @@ label { font-weight: 600; }
 .mini-bars span { background: #6b6f75; border-radius: 2px; overflow: hidden; }
 .mini-bars i { display: block; height: 100%; background: var(--red); }
 .job-thumb { flex-direction: column; display: flex; align-items: center; justify-content: center; }
+
+/* Telek és kerítés – egyetlen nézet */
+.plot-view { position: relative; border-radius: 8px; background: #16181b; border: 1px solid #2a2d31; overflow: hidden; touch-action: pan-y; }
+.plot-view .pv { display: block; width: 100%; height: auto; user-select: none; -webkit-user-select: none; }
+.pv-empty { padding: 36px 16px; text-align: center; }
+.pv-empty p { margin: 0 0 12px; }
+.pv-empty .muted { margin-top: 12px; }
+.fo { overflow: visible; pointer-events: none; }
+[data-side-len] .fo { pointer-events: auto; }
+.pill-wrap { display: flex; justify-content: center; align-items: center; height: 26px; }
+.vpill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 3px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; background: #2c3035; color: #fff; border: 1.5px solid #4a4e54; }
+.vpill i { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #55595f; font-style: normal; font-size: 11px; font-weight: 800; }
+.vpill.part { border-color: var(--red); } .vpill.part i { background: var(--red); }
+.vpill.ok { background: var(--red); border-color: var(--red); } .vpill.ok i { background: #fff; color: var(--red); }
+.vpill.side { padding: 1px 9px; gap: 5px; background: rgba(0,0,0,.55); border-color: rgba(255,255,255,.18); font-weight: 600; color: #cfd2d6; font-size: 11px; }
+.vpill.side b { color: #fff; }
+.vpill.side.edit { background: #2c3035; border-color: var(--red); color: #fff; cursor: pointer; pointer-events: auto; }
+[data-stage-g] { transition: opacity .15s; }
+[data-stage-g].dim { opacity: .25; }
+.stage-list-head { margin-top: 16px; }
+.stage-list-head h3 { margin: 0; }
+.stage-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; background: var(--input); border-left: 0; cursor: default; }
+@media (max-width: 560px) { .stage-row { flex-wrap: wrap; } .stage-row .band-done { text-align: left; } }
+.stage-row .stage-info { flex: 1 1 200px; min-width: 0; }
+@media (max-width: 560px) {
+  .stage-row .band-done { flex: 1 1 auto; text-align: left; padding-left: 34px; }
+  .stage-row .row-btns { margin-left: auto; }
+}

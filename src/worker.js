@@ -589,9 +589,19 @@ function allocateDone(stages, sums) {
 }
 
 function parsePlot(s) { try { return s ? JSON.parse(s) : null; } catch { return null; } }
-// Telek: { points: [[lat, lng], …] (3–60 pont), lengths: { oldal: méter } kézi felülírás }.
+// Telek: { unit: 'm', points: [[x, y], …] } méterben (3–60 pont); a régi formátum [lat, lng] pontokkal is elfogadott.
 function validPlot(p) {
   if (!p || !Array.isArray(p.points) || p.points.length < 3 || p.points.length > 60) bad('A telekhez legalább 3 sarokpont kell');
+  // unit: 'm' = helyi méteres koordináták (a rajzolóból); egyébként régi térképes [szélesség, hosszúság].
+  if (p.unit === 'm') {
+    const points = p.points.map((q) => {
+      if (!Array.isArray(q) || q.length !== 2) bad('Hibás telekpont');
+      const [x, y] = q.map(Number);
+      if (!(Math.abs(x) < 10000 && Math.abs(y) < 10000)) bad('Hibás telekpont');
+      return [Math.round(x * 100) / 100, Math.round(y * 100) / 100];
+    });
+    return { unit: 'm', points };
+  }
   const points = p.points.map((q) => {
     if (!Array.isArray(q) || q.length !== 2) bad('Hibás telekpont');
     const [la, ln] = q.map(Number);

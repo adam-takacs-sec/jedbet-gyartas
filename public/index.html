@@ -163,6 +163,7 @@
           <label>Nap<input name="day" type="date" required></label>
           <label data-for="template">Minta<select name="template" id="tf-template"></select></label>
           <label data-for="job">Projekt<select name="job_id" id="tf-job"></select></label>
+          <label data-for="stage">Szakasz<select name="stage_id" id="tf-stage"></select></label>
           <label data-for="qty"><span id="tf-qty-label">Tervezett mennyiség</span><span class="qty"><button type="button" data-step="-1" aria-label="Kevesebb">−</button><input name="qty" type="number" inputmode="decimal" min="0" step="any"><button type="button" data-step="1" aria-label="Több">+</button></span></label>
           <label class="full" data-for="title">Megnevezés<input name="title" maxlength="120" placeholder="pl. Kavics lerakás, zsaluk javítása"></label>
           <label class="full">Megjegyzés<input name="note" maxlength="500"></label>
@@ -293,6 +294,7 @@
           <label class="full">Szakasz neve<input name="stage_name" required maxlength="120" placeholder="pl. Utcafront"></label>
           <label>Hossz (m)<input name="length_m" type="number" inputmode="decimal" step="any" min="0.5" required></label>
           <label>Minta<select name="template" id="stage-template"></select></label>
+          <label class="full" data-for="turn">Merre megy az előző szakasz végétől?<select name="turn" id="stage-turn"></select></label>
           <label class="full">Megjegyzés<input name="note" maxlength="500"></label>
         </div>
         <div id="stage-preview" class="stage-preview"></div>

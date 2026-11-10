@@ -403,13 +403,15 @@ async function routeApi(request, env, url, user) {
 
   // --- Munkák ---
   if (p === '/api/jobs' && m === 'GET') {
-    const [{ results }, { results: stages }] = await db.batch([
+    const [{ results }, { results: stages }, { results: sums }] = await db.batch([
       db.prepare(`SELECT j.*, (SELECT COALESCE(SUM(length_m),0) FROM job_stages WHERE job_id = j.id) AS total_m,
          (SELECT COALESCE(SUM(done_qty),0) FROM tasks WHERE job_id = j.id AND kind = 'telepites') AS done_m
        FROM jobs j ORDER BY (j.status = 'Aktív') DESC, j.id DESC`),
-      db.prepare('SELECT id, job_id, stage_name, length_m, template FROM job_stages ORDER BY id'),
-    ]);
-    return json(results.map((j) => ({ ...j, stages: stages.filter((s) => s.job_id === j.id) })));
+      db.prepare('SELECT id, job_id, stage_name, length_m, template, turn FROM job_stages ORDER BY id'),
+      db.prepare(`${DONE_SQL} GROUP BY job_id, stage_id`),
+    ]).then((r) => [r[0], r[1], r[2]]);
+    return json(results.map((j) => ({ ...j,
+      stages: allocateDone(stages.filter((x) => x.job_id === j.id), sums.filter((x) => x.job_id === j.id)) })));
   }
   if (p === '/api/jobs' && m === 'POST') {
     const b = await body(request);
@@ -436,23 +438,27 @@ async function routeApi(request, env, url, user) {
     const b = await body(request);
     const template = str(b.template, 'minta', { required: true });
     if (!PANEL_TEMPLATES.includes(template)) bad('Ismeretlen minta');
-    await db.prepare('INSERT INTO job_stages (job_id, stage_name, length_m, template, note) VALUES (?,?,?,?,?)')
+    await db.prepare('INSERT INTO job_stages (job_id, stage_name, length_m, template, note, turn) VALUES (?,?,?,?,?,?)')
       .bind(+r[1], str(b.stage_name, 'szakasz neve', { required: true, max: 120 }),
-        num(b.length_m, 'hossz', { min: 0.5, max: 5000 }), template, str(b.note, 'megjegyzés')).run();
+        num(b.length_m, 'hossz', { min: 0.5, max: 5000 }), template, str(b.note, 'megjegyzés'),
+        num(b.turn, 'fordulás', { min: -180, max: 180, def: 90 })).run();
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/stages\/(\d+)$/)) && m === 'PATCH') {
     const b = await body(request);
     const template = str(b.template, 'minta', { required: true });
     if (!PANEL_TEMPLATES.includes(template)) bad('Ismeretlen minta');
-    const res = await db.prepare('UPDATE job_stages SET stage_name = ?, length_m = ?, template = ?, note = ? WHERE id = ?')
+    const res = await db.prepare('UPDATE job_stages SET stage_name = ?, length_m = ?, template = ?, note = ?, turn = ? WHERE id = ?')
       .bind(str(b.stage_name, 'szakasz neve', { required: true, max: 120 }), num(b.length_m, 'hossz', { min: 0.5, max: 5000 }),
-        template, str(b.note, 'megjegyzés'), +r[1]).run();
+        template, str(b.note, 'megjegyzés'), num(b.turn, 'fordulás', { min: -180, max: 180, def: 90 }), +r[1]).run();
     if (!res.meta.changes) notFound();
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/stages\/(\d+)$/)) && m === 'DELETE') {
-    await db.prepare('DELETE FROM job_stages WHERE id = ?').bind(+r[1]).run();
+    await db.batch([
+      db.prepare('UPDATE tasks SET stage_id = NULL WHERE stage_id = ?').bind(+r[1]),
+      db.prepare('DELETE FROM job_stages WHERE id = ?').bind(+r[1]),
+    ]);
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/jobs\/(\d+)\/summary$/)) && m === 'GET') {
@@ -564,9 +570,27 @@ function decodePng(b64) {
   return bytes;
 }
 
+// Telepített hossz szakaszonként: a szakaszhoz kötött telepítések, a szakasz nélküliek pedig sorban töltik fel
+// a szakaszokat (az elsőtől kezdve), legfeljebb a szakasz hosszáig.
+function allocateDone(stages, sums) {
+  const by = Object.fromEntries(sums.filter((x) => x.stage_id).map((x) => [x.stage_id, x.m]));
+  let free = sums.filter((x) => !x.stage_id || !stages.some((st) => st.id === x.stage_id)).reduce((a, x) => a + x.m, 0);
+  return stages.map((st) => {
+    let d = Math.min(st.length_m, by[st.id] || 0);
+    const add = Math.min(st.length_m - d, free);
+    d += add; free -= add;
+    return { ...st, done_m: d };
+  });
+}
+const DONE_SQL = `SELECT job_id, stage_id, SUM(done_qty) AS m FROM tasks WHERE kind = 'telepites' AND done_qty IS NOT NULL`;
+
 // Munka anyagigénye: 2 m = 1 oszlopköz = 4 panel; szakaszonként 2 végoszlop.
 async function jobSummary(db, jobId) {
-  const { results: stages } = await db.prepare('SELECT * FROM job_stages WHERE job_id = ? ORDER BY id').bind(jobId).all();
+  const [{ results: rawStages }, { results: sums }] = await db.batch([
+    db.prepare('SELECT * FROM job_stages WHERE job_id = ? ORDER BY id').bind(jobId),
+    db.prepare(`${DONE_SQL} AND job_id = ? GROUP BY job_id, stage_id`).bind(jobId),
+  ]);
+  const stages = allocateDone(rawStages, sums);
   const need = { 'Végoszlop': 0, 'Középoszlop': 0 };
   const details = stages.map((s) => {
     const spans = Math.max(1, Math.ceil(s.length_m / 2 - 1e-9));

@@ -207,7 +207,7 @@ $('#day-hero').addEventListener('click', async (e) => {
 function taskName(t) {
   const k = ns.cfg.kinds[t.kind].label;
   if (t.kind === 'ontes' || (t.kind === 'kiforgatas' && t.template)) return `${k}: ${t.template}`;
-  if (t.kind === 'telepites') return `${k}: ${t.job_name || '?'}`;
+  if (t.kind === 'telepites') return `${k}: ${t.job_name || '?'}${t.stage_name ? ' – ' + t.stage_name : ''}`;
   if (t.kind === 'egyeb') return t.title || k;
   return t.title ? `${k}: ${t.title}` : k;
 }
@@ -343,7 +343,8 @@ $('#tasks').addEventListener('submit', async (e) => {
 
 // --- Feladat felvétele / szerkesztése (felugró ablak; nap-, hét- és hónapnézetből is) ---
 async function openTaskForm(mode, day = ns.day) {
-  if (!ns.jobs.length && !ns.jobsLoaded) { ns.jobs = (await api('/api/jobs')).filter((j) => j.status === 'Aktív'); ns.jobsLoaded = true; }
+  // A projektek a szakaszaikkal (telepítésnél a szakasz kiválasztásához).
+  ns.jobs = (await api('/api/jobs')).filter((j) => j.status === 'Aktív' || j.id === mode.edit?.job_id);
   ns.taskMode = mode;
   const f = $('#task-form');
   f.reset();
@@ -355,7 +356,7 @@ async function openTaskForm(mode, day = ns.day) {
   f.day.value = t ? t.day : day;
   if (t) {
     f.kind.value = t.kind; syncTaskForm();
-    f.template.value = t.template || ''; f.job_id.value = t.job_id || '';
+    f.template.value = t.template || ''; f.job_id.value = t.job_id || ''; syncStages(t.stage_id);
     f.qty.value = (extra ? t.done_qty : t.planned_qty) ?? ''; f.title.value = t.title; f.note.value = t.note;
   } else {
     f.kind.value = 'ontes'; syncTaskForm();
@@ -367,12 +368,22 @@ function syncTaskForm() {
   const extra = ns.taskMode === 'extra' || ns.taskMode?.edit?.unplanned;
   f.querySelector('[data-for="template"]').hidden = !['ontes', 'kiforgatas'].includes(k);
   f.querySelector('[data-for="job"]').hidden = k !== 'telepites';
+  syncStages();
   f.querySelector('[data-for="title"]').hidden = ['ontes', 'telepites'].includes(k);
   f.querySelector('[data-for="qty"]').hidden = k === 'egyeb';
   $('#tf-template').innerHTML = (k === 'kiforgatas' ? '<option value="">bármelyik</option>' : '') + opts(ns.templates.map((t) => [t, t]));
   const unit = ns.cfg.kinds[k].unit;
   $('#tf-qty-label').textContent = `${extra ? 'Elvégzett' : 'Tervezett'} mennyiség${unit ? ` (${unit})` : ''}`;
 }
+function syncStages(sel) {
+  const f = $('#task-form');
+  const job = ns.jobs.find((j) => j.id === +f.job_id.value);
+  const stages = f.kind.value === 'telepites' && job ? job.stages : [];
+  f.querySelector('[data-for="stage"]').hidden = !stages.length;
+  $('#tf-stage').innerHTML = `<option value="">sorban (az első nem kész szakasztól)</option>` +
+    stages.map((st) => `<option value="${st.id}" ${String(st.id) === String(sel ?? '') ? 'selected' : ''}>${esc(st.stage_name)} · ${fmt(st.length_m, 0)} m${st.done_m ? ` (${fmt(st.done_m, 0)} m kész)` : ''}</option>`).join('');
+}
+$('#tf-job').addEventListener('change', () => syncStages());
 $('#tf-kind').addEventListener('change', syncTaskForm);
 $('#task-add-btns').addEventListener('click', (e) => {
   const b = e.target.closest('[data-add-task]');
@@ -385,6 +396,7 @@ $('#task-form').addEventListener('submit', async (e) => {
   const common = {
     template: ['ontes', 'kiforgatas'].includes(k) ? f.template.value : null,
     job_id: k === 'telepites' ? f.job_id.value : null,
+    stage_id: k === 'telepites' ? f.stage_id.value : null,
     title: ['ontes', 'telepites'].includes(k) ? '' : f.title.value,
     note: f.note.value,
   };

@@ -17,6 +17,7 @@ const stageCalc = (len) => {
   const spans = Math.max(1, Math.ceil(len / 2 - 1e-9));
   return { spans, panels: spans * 4, veg: 2, kozep: spans - 1 };
 };
+const turnLabel = (t) => (TURNS.find(([v]) => v === Number(t)) || [0, `${t}°`])[1].toLowerCase();
 const daysLeft = (d) => (d ? Math.round((Date.parse(`${d}T12:00:00`) - Date.now()) / 86400000) : null);
 
 // Egyszer a lapra: a minták SVG-textúrái (minden kerítésrajz ezeket használja).
@@ -67,16 +68,87 @@ function fenceSvg(len, template, { perRow = 10 } = {}) {
   }).join('');
 }
 
-// Telefonon kevesebb oszlopköz fér egy sorba, hogy olvasható maradjon.
-const rowSpans = () => (window.innerWidth < 600 ? 5 : 10);
+// ---------------------------------------------------------------------------
+// Felülnézet: a szakaszok egymáshoz csatlakozva, a megadott fordulással.
+// Szürke = még nincs kész, JEDBET-piros = telepítve. Oszlopok 2 m-enként.
+const RED = '#d62828', RED_DARK = '#9e1b1b', GREY = '#6b6f75', GREY_POST = '#a3a6aa';
+const TURNS = [[90, 'Jobbra fordul'], [-90, 'Balra fordul'], [0, 'Egyenesen tovább'], [45, 'Jobbra, ferdén (45°)'], [-45, 'Balra, ferdén (45°)']];
 
-// Projekt kártyáján és fejlécén: a szakaszok egymás után, hosszuk arányában.
-function stageStrip(stages, { labels = true, done = 0 } = {}) {
-  const total = stages.reduce((a, s) => a + s.length_m, 0);
-  if (!total) return '<div class="strip empty"><span>Nincs szakasz</span></div>';
-  const pct = Math.min(100, (done / total) * 100);
-  return `<div class="strip">${stages.map((s) => `<span class="seg-${esc(s.template)}" style="flex:${s.length_m};--c:${tpl(s.template).accent}" title="${esc(s.stage_name)} · ${fmt(s.length_m, 0)} m · ${esc(s.template)}">${labels ? `<em>${esc(s.stage_name)}</em><small>${fmt(s.length_m, 0)} m</small>` : ''}</span>`).join('')}
-    ${done ? `<i class="strip-done" style="width:${pct}%"></i>` : ''}</div>`;
+function layout(stages) {
+  let x = 0, y = 0, h = 0;
+  return stages.map((st, i) => {
+    if (i > 0) h += Number(st.turn ?? 90);
+    const r = (h * Math.PI) / 180, dx = Math.cos(r), dy = Math.sin(r);
+    const seg = { ...st, x0: x, y0: y, x1: x + dx * st.length_m, y1: y + dy * st.length_m, dx, dy };
+    x = seg.x1; y = seg.y1;
+    return seg;
+  });
+}
+
+function topView(stages, { mini = false, highlight = null, maxW = 760, maxH = 420 } = {}) {
+  if (!stages.length) return '';
+  const segs = layout(stages);
+  const xs = segs.flatMap((s) => [s.x0, s.x1]), ys = segs.flatMap((s) => [s.y0, s.y1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = mini ? 10 : 56;
+  const k = Math.min((maxW - 2 * pad) / Math.max(maxX - minX, 1), (maxH - 2 * pad) / Math.max(maxY - minY, 1), mini ? 12 : 28);
+  const W = Math.max((maxX - minX) * k + 2 * pad, mini ? 120 : 260), H = Math.max((maxY - minY) * k + 2 * pad, mini ? 40 : 120);
+  const ox = (W - (maxX - minX) * k) / 2 - minX * k, oy = (H - (maxY - minY) * k) / 2 - minY * k;
+  const P = (x, y) => [ox + x * k, oy + y * k];
+  const pw = mini ? 4 : Math.max(4, Math.min(9, 0.25 * k)); // panelvonal vastagsága
+  let lines = '', posts = '', labels = '';
+  // Telek-kitöltés, ha a vonal nagyjából körbeér.
+  const end = segs[segs.length - 1];
+  const closed = segs.length >= 3 && Math.hypot(end.x1 - segs[0].x0, end.y1 - segs[0].y0) < 0.25 * segs.reduce((a, s) => a + s.length_m, 0);
+  const poly = segs.map((s) => P(s.x0, s.y0).join(',')).concat([P(end.x1, end.y1).join(',')]).join(' ');
+  const fillPoly = segs.length >= 2 ? `<polygon points="${poly}" fill="${closed ? 'rgba(214,40,40,.05)' : 'none'}" stroke="none"/>` : '';
+
+  for (const s of segs) {
+    const done = Math.min(s.done_m || 0, s.length_m);
+    const at = (d) => P(s.x0 + s.dx * d, s.y0 + s.dy * d);
+    const dim = highlight !== null && highlight !== s.id ? ' opacity=".35"' : '';
+    const [ax, ay] = at(0), [bx, by] = at(s.length_m), [cx, cy] = at(done);
+    lines += `<g${dim}><line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${GREY}" stroke-width="${pw}" stroke-linecap="butt"/>`;
+    if (done > 0) lines += `<line x1="${ax}" y1="${ay}" x2="${cx}" y2="${cy}" stroke="${RED}" stroke-width="${pw}" stroke-linecap="butt"/>`;
+    if (highlight === s.id) lines += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#fff" stroke-opacity=".5" stroke-width="${pw + 6}" stroke-linecap="round" fill="none" style="mix-blend-mode:overlay"/>`;
+    lines += '</g>';
+    if (!mini) {
+      const spans = Math.max(1, Math.ceil(s.length_m / 2 - 1e-9));
+      for (let i = 0; i <= spans; i++) {
+        const d = Math.min(i * 2, s.length_m), isEnd = i === 0 || i === spans;
+        const [px, py] = at(d), sz = isEnd ? pw + 5 : pw + 2;
+        const col = d <= done + 1e-6 && done > 0 ? (isEnd ? RED_DARK : RED) : (isEnd ? '#d9dbde' : GREY_POST);
+        const rot = (Math.atan2(s.dy, s.dx) * 180) / Math.PI;
+        posts += `<rect${dim} x="${px - sz / 2}" y="${py - sz / 2}" width="${sz}" height="${sz}" fill="${col}" stroke="#1b1d20" stroke-width="1" transform="rotate(${rot} ${px} ${py})"/>`;
+      }
+      // Felirat a szakasz közepénél, a vonal mellett (kifelé), olvasható irányban.
+      const [mx, my] = at(s.length_m / 2);
+      let ang = (Math.atan2(s.dy, s.dx) * 180) / Math.PI;
+      const flip = ang > 90 || ang < -90;
+      if (flip) ang += 180;
+      const nx = s.dy, ny = -s.dx; // bal oldali normális (a menetirányhoz képest kifelé, ha jobbra fordulunk)
+      const off = pw / 2 + 7;
+      const tx = mx + nx * off, ty = my + ny * off;
+      const name = `${s.stage_name} · ${fmt(s.length_m, s.length_m % 1 ? 1 : 0)} m`;
+      const sub = done >= s.length_m - 1e-6 ? 'kész' : done > 0 ? `${fmt(done, 0)} / ${fmt(s.length_m, 0)} m kész` : esc(s.template);
+      labels += `<g${dim} transform="translate(${tx} ${ty}) rotate(${ang})"><text text-anchor="middle" y="${flip ? 23 : -15}" font-size="12" font-weight="700" fill="var(--ink)">${esc(name)}</text>
+        <text text-anchor="middle" y="${flip ? 10 : -2}" font-size="10" fill="${done > 0 ? RED : 'var(--muted)'}" font-weight="${done > 0 ? 700 : 400}">${sub}</text></g>`;
+    }
+  }
+  // Léptékvonal
+  let scale = '';
+  if (!mini) {
+    const nice = [1, 2, 5, 10, 20, 50, 100].find((m) => m * k >= 60) || 100;
+    const sx = 14, sy = H - 14;
+    scale = `<g><path d="M${sx} ${sy - 4}V${sy}H${sx + nice * k}V${sy - 4}" stroke="var(--muted)" fill="none" stroke-width="1.2"/>
+      <text x="${sx + nice * k + 6}" y="${sy}" font-size="10" fill="var(--muted)">${nice} m</text></g>`;
+    // Kezdőpont jelölése
+    const [s0x, s0y] = P(segs[0].x0, segs[0].y0);
+    scale += `<circle cx="${s0x}" cy="${s0y}" r="${pw / 2 + 6}" fill="none" stroke="var(--muted)" stroke-dasharray="2 2"/>`;
+  }
+  return `<svg class="topview ${mini ? 'mini' : ''}" viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}" role="img" aria-label="Kerítés felülnézetből">
+    ${mini ? '' : '<defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="var(--line)" stroke-width=".5"/></pattern></defs><rect width="100%" height="100%" fill="url(#grid)" opacity=".6"/>'}
+    ${fillPoly}${lines}${posts}${labels}${scale}</svg>`;
 }
 
 // ===================================================================
@@ -84,6 +156,7 @@ export function initJobs(config) {
   js.templates = config.panelTemplates;
   $('#stage-template').innerHTML = js.templates.map((t) => `<option>${esc(t)}</option>`).join('');
   injectPatterns();
+  $('#stage-turn').innerHTML = TURNS.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
 }
 
 export async function loadJobs() {
@@ -98,7 +171,7 @@ export async function loadJobs() {
     return `<button type="button" class="job-card ${js.selected === j.id ? 'active' : ''} ${j.status === 'Aktív' ? '' : 'done'}" data-job="${j.id}">
       <div class="job-top"><b>${esc(j.name)}</b>${j.status === 'Aktív' ? deadline : '<span class="chip-s ok">Befejezett</span>'}</div>
       <div class="muted small">${[j.client_name, j.location].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div>
-      ${stageStrip(j.stages, { labels: true, done: j.done_m })}
+      <div class="job-thumb">${j.stages.length ? topView(j.stages, { mini: true, maxW: 300, maxH: 110 }) : '<span class="muted small">Nincs szakasz</span>'}</div>
       <div class="job-foot small"><span><b>${fmt(j.total_m, 0)} m</b> · ${j.stages.length} szakasz · ${panels} panel</span>
         ${j.done_m ? `<span>telepítve <b>${pct}%</b></span>` : ''}</div>
     </button>`;
@@ -148,19 +221,24 @@ async function showJob(id, scroll) {
     <span>Panel <b>${t.panels}</b><small>db</small></span>
     <span>Végoszlop <b>${t.veg}</b></span>
     <span>Középoszlop <b>${t.kozep}</b></span>`;
-  $('#jd-overview').innerHTML = s.stages.length ? `<div class="overview">${stageStrip(s.stages, { done: s.install.done_m })}
-    ${s.install.done_m ? `<p class="muted small">A sötétített rész a telepített hossz (${fmt(s.install.done_m, 0)} m); a napi lapon rögzített telepítésekből.</p>` : ''}</div>` : '';
+  const doneTotal = s.stages.reduce((a, x) => a + x.done_m, 0);
+  const pctAll = t.m ? Math.round((doneTotal / t.m) * 100) : 0;
+  $('#jd-overview').innerHTML = s.stages.length ? `<div class="topview-wrap">${topView(s.stages, { highlight: js.hover ?? null })}</div>
+    <div class="legend small muted"><span><i class="lg tv-grey"></i>még nincs kész</span><span><i class="lg tv-red"></i>telepítve (${fmt(doneTotal, 0)} m, ${pctAll}%)</span><span>■ oszlop 2 m-enként, a nagyobb a végoszlop</span><span>◌ kezdőpont</span></div>` : '';
 
-  $('#jd-stages').innerHTML = s.stages.map((x, i) => `
-    <div class="stage" data-stage="${x.id}" style="--c:${tpl(x.template).accent}">
-      <div class="stage-head">
-        <div><span class="stage-no">${i + 1}</span><b>${esc(x.stage_name)}</b> <span class="tpl-chip">${esc(x.template)}</span>
-          <div class="muted small">${fmt(x.length_m, x.length_m % 1 ? 1 : 0)} m · ${x.spans} köz · <b>${x.panels} panel</b> · ${x.veg} vég + ${x.kozep} közép oszlop${x.note ? ' · ' + esc(x.note) : ''}</div></div>
-        <span class="row-btns"><button class="btn sm ghost" data-edit-stage="${x.id}" aria-label="Szerkesztés">✎</button><button class="btn sm ghost" data-del-stage="${x.id}" aria-label="Törlés">✕</button></span>
-      </div>
-      <div class="fence-wrap">${fenceSvg(x.length_m, x.template, { perRow: rowSpans() })}</div>
-    </div>`).join('') || '<p class="muted">Még nincs szakasz. Add hozzá az első szakaszt a hosszal és a mintával.</p>';
-  $('#jd-legend').innerHTML = s.stages.length ? '<span><i class="lg post-end"></i>végoszlop</span><span><i class="lg post-mid"></i>középoszlop</span><span>2 m = 1 oszlopköz = 4 panel</span>' : '';
+  $('#jd-stages').innerHTML = s.stages.map((x, i) => {
+    const pct = Math.round((x.done_m / x.length_m) * 100);
+    return `<div class="stage-row" data-stage="${x.id}" style="--c:${tpl(x.template).accent}">
+      <span class="stage-no ${pct >= 100 ? 'ok' : ''}">${pct >= 100 ? '✓' : i + 1}</span>
+      <div class="stage-info"><div><b>${esc(x.stage_name)}</b> <span class="tpl-chip">${esc(x.template)}</span>
+        ${i > 0 ? `<span class="muted small">${esc(turnLabel(x.turn))}</span>` : ''}</div>
+        <div class="muted small">${fmt(x.length_m, x.length_m % 1 ? 1 : 0)} m · ${x.spans} köz · <b>${x.panels} panel</b> · ${x.veg} vég + ${x.kozep} közép oszlop${x.note ? ' · ' + esc(x.note) : ''}</div>
+        <div class="bar sm ${pct >= 100 ? 'done' : ''}"><i style="width:${pct}%"></i></div></div>
+      <span class="stage-done"><b>${fmt(x.done_m, 0)}</b>/${fmt(x.length_m, 0)} m</span>
+      <span class="row-btns"><button class="btn sm ghost" data-edit-stage="${x.id}" aria-label="Szerkesztés">✎</button><button class="btn sm ghost" data-del-stage="${x.id}" aria-label="Törlés">✕</button></span>
+    </div>`;
+  }).join('') || '<p class="muted">Még nincs szakasz. Add hozzá az elsőt: hossz, minta, és hogy merre fordul az előzőhöz képest.</p>';
+  $('#jd-legend').innerHTML = '';
 
   $('#jd-summary tbody').innerHTML = s.summary.map((x) => `<tr><td>${esc(x.item)}</td><td class="num">${x.needed}</td>
     <td class="num">${x.in_stock}</td><td class="num ${x.missing ? 'neg' : ''}">${x.missing}</td></tr>`).join('')
@@ -209,6 +287,14 @@ $('#job-detail').addEventListener('click', async (e) => {
   if (del && confirm('Törlöd a szakaszt?')) { await api(`/api/stages/${del.dataset.delStage}`, { method: 'DELETE' }); loadJobs(); }
 });
 $('#stage-new').addEventListener('click', () => openStage(null));
+$('#jd-stages').addEventListener('mouseover', (e) => {
+  const r = e.target.closest('[data-stage]');
+  const id = r ? +r.dataset.stage : null;
+  if (id === js.hover || !js.detail) return;
+  js.hover = id;
+  $('.topview-wrap').innerHTML = topView(js.detail.stages, { highlight: id });
+});
+$('#jd-stages').addEventListener('mouseleave', () => { js.hover = null; if (js.detail?.stages.length) $('.topview-wrap').innerHTML = topView(js.detail.stages); });
 $$('[data-close-dialog]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 
 $('#job-form').addEventListener('submit', async (e) => {
@@ -231,7 +317,10 @@ function openStage(st) {
   const f = $('#stage-form'); f.reset();
   $('#stage-dialog-title').textContent = st ? 'Szakasz szerkesztése' : 'Új szakasz';
   f.querySelector('[type=submit]').textContent = st ? 'Mentés' : 'Hozzáadás';
-  if (st) { f.stage_name.value = st.stage_name; f.length_m.value = st.length_m; f.template.value = st.template; f.note.value = st.note || ''; }
+  const first = st ? js.detail.stages[0]?.id === st.id : !js.detail?.stages.length;
+  f.querySelector('[data-for="turn"]').hidden = first;
+  f.turn.value = '90';
+  if (st) { f.stage_name.value = st.stage_name; f.length_m.value = st.length_m; f.template.value = st.template; f.note.value = st.note || ''; f.turn.value = String(st.turn ?? 90); }
   else if (js.detail?.stages.length) f.template.value = js.detail.stages[js.detail.stages.length - 1].template;
   previewStage();
   $('#stage-dialog').showModal();
@@ -239,9 +328,12 @@ function openStage(st) {
 function previewStage() {
   const f = $('#stage-form');
   const len = parseFloat(String(f.length_m.value).replace(',', '.'));
-  if (!(len >= 0.5)) { $('#stage-preview').innerHTML = '<p class="muted small">Add meg a hosszt, és itt látod a kerítést.</p>'; return; }
+  if (!(len >= 0.5)) { $('#stage-preview').innerHTML = '<p class="muted small">Add meg a hosszt, és itt látod felülről, hogyan illeszkedik a többihez.</p>'; return; }
   const c = stageCalc(len);
-  $('#stage-preview').innerHTML = `<div class="fence-wrap">${fenceSvg(len, f.template.value, { perRow: rowSpans() })}</div>
+  const me = { id: -1, stage_name: f.stage_name.value || 'Új szakasz', length_m: len, template: f.template.value, turn: Number(f.turn.value), done_m: 0 };
+  const others = js.detail?.stages || [];
+  const list = js.editingStage ? others.map((x) => (x.id === js.editingStage.id ? { ...me, id: x.id, done_m: x.done_m } : x)) : [...others, me];
+  $('#stage-preview').innerHTML = `${topView(list, { highlight: js.editingStage ? js.editingStage.id : -1, maxW: 520, maxH: 260 })}
     <p class="small">${c.spans} oszlopköz · <b>${c.panels} panel</b> · ${c.veg} végoszlop + ${c.kozep} középoszlop${len % 2 ? ` <span class="muted">(az utolsó köz ${fmt(len - 2 * (c.spans - 1), 1)} m)</span>` : ''}</p>`;
 }
 $('#stage-form').addEventListener('input', previewStage);

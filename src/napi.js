@@ -92,10 +92,18 @@ async function demoldedByDay(db, fromDay, toDay) {
   return out;
 }
 
-const TASK_SELECT = `SELECT t.*, j.name AS job_name, r.name AS run_name
-  FROM tasks t LEFT JOIN jobs j ON j.id = t.job_id LEFT JOIN curing_runs r ON r.id = t.run_id`;
+const TASK_SELECT = `SELECT t.*, j.name AS job_name, r.name AS run_name, st.stage_name
+  FROM tasks t LEFT JOIN jobs j ON j.id = t.job_id LEFT JOIN curing_runs r ON r.id = t.run_id LEFT JOIN job_stages st ON st.id = t.stage_id`;
 const LOG_SELECT = `SELECT l.*, w.name AS worker_name, j.name AS job_name
   FROM work_logs l JOIN workers w ON w.id = l.worker_id LEFT JOIN jobs j ON j.id = l.job_id`;
+
+async function stageOf(db, v, jobId) {
+  const id = optId(v, 'szakasz');
+  if (!id) return null;
+  const st = await db.prepare('SELECT id FROM job_stages WHERE id = ? AND job_id = ?').bind(id, jobId).first();
+  if (!st) bad('A szakasz nem ehhez a projekthez tartozik');
+  return id;
+}
 
 async function getTask(db, id) {
   const t = await db.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first();
@@ -248,9 +256,9 @@ export async function routeNap(request, env, url, user, p, m) {
         const left = t.planned_qty === null ? null : Math.max(0, t.planned_qty - (t.done_qty || 0));
         if (left === 0) continue;
         stmts.push(db.prepare(
-          `INSERT INTO tasks (day, kind, title, template, job_id, planned_qty, unit, note, carried_from, sort)
-           VALUES (?,?,?,?,?,?,?,?,?,?)`)
-          .bind(next, t.kind, t.title, t.template, t.job_id, left, t.unit, t.note, t.id, t.sort - 1000));
+          `INSERT INTO tasks (day, kind, title, template, job_id, stage_id, planned_qty, unit, note, carried_from, sort)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+          .bind(next, t.kind, t.title, t.template, t.job_id, t.stage_id ?? null, left, t.unit, t.note, t.id, t.sort - 1000));
         carried++;
       }
     }
@@ -301,10 +309,11 @@ export async function routeNap(request, env, url, user, p, m) {
     // Plusz munkát utólag írunk be, ezért alapból kész.
     const status = unplanned ? 'kesz' : 'terv';
     const { mx } = await db.prepare('SELECT COALESCE(MAX(sort),0) AS mx FROM tasks WHERE day = ?').bind(day).first();
+    const stageId = kind === 'telepites' ? await stageOf(db, b.stage_id, jobId) : null;
     const row = await db.prepare(
-      `INSERT INTO tasks (day, kind, title, template, job_id, planned_qty, done_qty, unit, status, unplanned, note, sort)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`)
-      .bind(day, kind, title, template, jobId, unplanned ? null : planned, unplanned ? (done ?? planned) : null,
+      `INSERT INTO tasks (day, kind, title, template, job_id, stage_id, planned_qty, done_qty, unit, status, unplanned, note, sort)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`)
+      .bind(day, kind, title, template, jobId, stageId, unplanned ? null : planned, unplanned ? (done ?? planned) : null,
         TASK_KINDS[kind].unit, status, unplanned, str(b.note, 'megjegyzés'), mx + 1).first();
     return json({ task_id: row.id });
   }
@@ -318,6 +327,7 @@ export async function routeNap(request, env, url, user, p, m) {
       if (v.template && !TEMPLATES.includes(v.template)) bad('Ismeretlen minta');
     }
     if (b.job_id !== undefined) v.job_id = optId(b.job_id, 'projekt');
+    if (b.stage_id !== undefined || b.job_id !== undefined) v.stage_id = v.kind === 'telepites' ? await stageOf(db, b.stage_id ?? v.stage_id, v.job_id) : null;
     if (b.planned_qty !== undefined) v.planned_qty = optNum(b.planned_qty, 'tervezett mennyiség', { min: 0, max: 100000 });
     if (b.done_qty !== undefined) v.done_qty = optNum(b.done_qty, 'elkészült mennyiség', { min: 0, max: 100000 });
     if (b.status !== undefined) {
@@ -332,8 +342,8 @@ export async function routeNap(request, env, url, user, p, m) {
     if (v.kind === 'ontes' && !v.template) bad('Öntésnél add meg a mintát');
     if (v.kind === 'telepites' && !v.job_id) bad('Telepítésnél add meg a projektet');
     if (['kesz', 'terv', 'folyamatban'].includes(v.status)) v.reason = v.status === 'kesz' ? '' : v.reason;
-    await db.prepare(`UPDATE tasks SET title=?, template=?, job_id=?, planned_qty=?, done_qty=?, status=?, reason=?, note=?, day=?, unplanned=?
-      WHERE id = ?`).bind(v.title, v.template, v.job_id, v.planned_qty, v.done_qty, v.status, v.reason, v.note, v.day, v.unplanned, t.id).run();
+    await db.prepare(`UPDATE tasks SET title=?, template=?, job_id=?, stage_id=?, planned_qty=?, done_qty=?, status=?, reason=?, note=?, day=?, unplanned=?
+      WHERE id = ?`).bind(v.title, v.template, v.job_id, v.stage_id ?? null, v.planned_qty, v.done_qty, v.status, v.reason, v.note, v.day, v.unplanned, t.id).run();
     return json({ ok: true });
   }
   if ((r = p.match(/^\/api\/tasks\/(\d+)$/)) && m === 'DELETE') {

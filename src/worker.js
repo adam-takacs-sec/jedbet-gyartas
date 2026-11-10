@@ -1,14 +1,14 @@
 import { computeMaturity, hoursToTarget } from './maturity.js';
+import { TEMPLATES, PANEL_TEMPLATES, TZ, HttpError, bad, notFound, json, body, num, str, localDate, localDateTime } from './util.js';
+import { routeNap, HOURS_SQL } from './napi.js';
 
 // ---------------------------------------------------------------------------
 // Beállítások
 // ---------------------------------------------------------------------------
-export const TEMPLATES = ['Végoszlop', 'Középoszlop', 'Mediterrán', 'Homokkő', 'Hullám'];
-const PANEL_TEMPLATES = TEMPLATES.filter((t) => !t.endsWith('oszlop'));
+export { TEMPLATES } from './util.js';
 const POUR_STATUSES = ['Kötés alatt', 'Raktározott', 'Lefoglalt', 'Beépítve', 'Selejt'];
 const PALLET_STATUSES = ['Raktáron', 'Lefoglalt', 'Kiszállítva', 'Selejt'];
 const MATERIALS = { cement: 'Cement', viz: 'Víz', kavics: 'Kavics', folyosito: 'Folyósító', kalcidur: 'Kalcidur' };
-const TZ = 'Europe/Budapest';
 const SITE = { lat: 47.65, lon: 17.92 }; // Bana
 
 // ---------------------------------------------------------------------------
@@ -127,36 +127,6 @@ async function logStation(env) {
   ]);
 }
 
-class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
-}
-const bad = (msg) => { throw new HttpError(400, msg); };
-const notFound = () => { throw new HttpError(404, 'Nem található'); };
-
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
-  });
-}
-
-async function body(request) {
-  try { return await request.json(); } catch { bad('Érvénytelen JSON'); }
-}
-
-const num = (v, name, { min = -Infinity, max = Infinity, def } = {}) => {
-  if ((v === undefined || v === null || v === '') && def !== undefined) return def;
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < min || n > max) bad(`Érvénytelen érték: ${name}`);
-  return n;
-};
-const str = (v, name, { max = 500, required = false } = {}) => {
-  const s = (v ?? '').toString().trim();
-  if (required && !s) bad(`Hiányzik: ${name}`);
-  if (s.length > max) bad(`Túl hosszú: ${name}`);
-  return s;
-};
-
 // ---------------------------------------------------------------------------
 // Hitelesítés
 // ---------------------------------------------------------------------------
@@ -236,6 +206,9 @@ async function routeApi(request, env, url, user) {
   let r;
 
   if (p === '/api/me' && m === 'GET') return json(user);
+  const napRes = await routeNap(request, env, url, user, p, m);
+  if (napRes) return napRes;
+
   if (p === '/api/config' && m === 'GET') {
     return json({ templates: TEMPLATES, panelTemplates: PANEL_TEMPLATES, statuses: POUR_STATUSES, palletStatuses: PALLET_STATUSES });
   }
@@ -489,7 +462,8 @@ async function routeApi(request, env, url, user) {
   }
   if (p === '/api/curing' && m === 'GET') {
     const { results } = await db.prepare(
-      `SELECT * FROM curing_runs ORDER BY (ended_at IS NULL) DESC, id DESC LIMIT 30`).all();
+      `SELECT r.*, (SELECT SUM(done_qty) FROM tasks WHERE run_id = r.id AND kind = 'ontes') AS poured_count
+       FROM curing_runs r ORDER BY (r.ended_at IS NULL) DESC, r.id DESC LIMIT 30`).all();
     const out = [];
     for (const run of results) out.push(await runStatus(db, run, false));
     return json(out);
@@ -590,7 +564,18 @@ async function jobSummary(db, jobId) {
   const summary = Object.entries(need).filter(([, n]) => n > 0).map(([item, needed]) => ({
     item, needed, in_stock: have[item] || 0, missing: Math.max(0, needed - (have[item] || 0)),
   }));
-  return { stages: details, summary };
+  const [prog, labor, { results: days }] = await db.batch([
+    db.prepare(`SELECT COALESCE(SUM(done_qty),0) AS done_m FROM tasks WHERE job_id = ? AND kind = 'telepites'`).bind(jobId),
+    db.prepare(`SELECT COALESCE(SUM(${HOURS_SQL}),0) AS hours, COALESCE(SUM(amount),0) AS cost, COUNT(DISTINCT day) AS days
+                FROM work_logs WHERE job_id = ?`).bind(jobId),
+    db.prepare(`SELECT t.day, SUM(t.done_qty) AS done_m,
+                  (SELECT GROUP_CONCAT(w.name, ', ') FROM work_logs l JOIN workers w ON w.id = l.worker_id
+                   WHERE l.job_id = t.job_id AND l.day = t.day) AS workers
+                FROM tasks t WHERE t.job_id = ? AND t.kind = 'telepites' AND t.done_qty IS NOT NULL
+                GROUP BY t.day ORDER BY t.day`).bind(jobId),
+  ]).then((r) => [r[0].results[0], r[1].results[0], r[2]]);
+  const total_m = stages.reduce((a, s) => a + s.length_m, 0);
+  return { stages: details, summary, install: { total_m, done_m: prog.done_m, hours: labor.hours, cost: labor.cost, work_days: labor.days, days } };
 }
 
 async function runStatus(db, run, withSeries) {
@@ -696,11 +681,3 @@ async function routeDevice(request, env, url) {
   notFound();
 }
 
-// ---------------------------------------------------------------------------
-function localDate(d) {
-  return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-}
-function localDateTime(d) {
-  return new Intl.DateTimeFormat('hu-HU', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit' }).format(d);
-}

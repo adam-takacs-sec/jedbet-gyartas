@@ -14,10 +14,20 @@ Pi (jedbet_agent.py) ── HTTPS ───────┘  /device/readings, /d
 | | |
 |---|---|
 | `src/worker.js` | API: keverés, öntés, készlet, munkák, szenzoradat, nyomtatási sor, érlelés |
+| `src/napi.js` | Napi lap: tervezett és plusz feladatok, öntés indítása/lezárása (→ kötés), napzárás, munkások, munkanapló, kifizetések |
 | `src/maturity.js` | Nurse–Saul (T₀ = −10 °C) és egyenértékű kor (Freiesleben Hansen, 20 °C) |
 | `public/` | A felület. A címkét a böngésző rajzolja (384×240, 1 bites PNG, QR-ral) |
 | `pi/jedbet_agent.py` | 5 percenként szenzorok → felhő (helyi pufferrel); nyomtatási sor → `niimctl.py` |
 | `pi/install.sh` | A Pi-n: telepíti az ügynököt, leállítja a régi szolgáltatásokat, tokent generál |
+
+## Napi lap
+
+- Reggel: tervezett feladatok (öntés mintával és darabbal, kiforgatás, mosás, telepítés projekthez, egyéb).
+- Öntés: *Öntés indítása* rögzíti a kezdést; *Öntés lezárása* az öntött darabot és a befejezést, és innen indul a kötés (vagy egy nyitott kötéshez adható).
+- Kiforgatáskor a kötésnél a raklapok darabszáma; a kötés kártyája mutatja az öntött és a kiforgatott darabot.
+- Munkások: érkezés/távozás (HH:MM), szünet; bér órabér, napidíj vagy darabbér szerint, a rögzítéskori díjjal. Kézzel felülírható.
+- Napzárás: a nem lezárt tervek „nem készült el” állapotba kerülnek; a nem/részben kész feladatok maradéka átkerülhet a következő napra.
+- Egyenleg munkásonként: megdolgozott bér − (bér + előleg + kölcsön) + visszafizetés.
 
 ## Érlelés
 

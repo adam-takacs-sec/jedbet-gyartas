@@ -1,37 +1,7 @@
 // JEDBET gyártási felület
 
-const $ = (s, el = document) => el.querySelector(s);
-const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmt = (n, d = 1) => (n === null || n === undefined || Number.isNaN(n) ? '–' : Number(n).toLocaleString('hu-HU', { minimumFractionDigits: d, maximumFractionDigits: d }));
-const fmtTime = (iso) => iso ? new Date(iso).toLocaleString('hu-HU', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '–';
-const ago = (iso) => {
-  if (!iso) return null;
-  const min = (Date.now() - Date.parse(iso)) / 60000;
-  if (min < 1) return 'most';
-  if (min < 60) return `${Math.round(min)} perce`;
-  if (min < 1440) return `${Math.round(min / 60)} órája`;
-  return `${Math.round(min / 1440)} napja`;
-};
-
-async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    ...opts,
-    headers: { 'content-type': 'application/json', ...(opts.headers || {}) },
-    body: opts.body && typeof opts.body !== 'string' ? JSON.stringify(opts.body) : opts.body,
-  });
-  if (res.status === 401) { toast('Lejárt a belépés, frissítsd az oldalt.', true); throw new Error('401'); }
-  const data = res.status === 204 ? null : await res.json().catch(() => null);
-  if (!res.ok) { const msg = data?.error || `Hiba (${res.status})`; if (!opts.quiet) toast(msg, true); throw new Error(msg); }
-  return data;
-}
-
-let toastTimer;
-function toast(msg, err = false) {
-  const t = $('#toast');
-  t.textContent = msg; t.className = 'toast' + (err ? ' err' : ''); t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), err ? 5000 : 2500);
-}
+import { $, $$, esc, fmt, fmtTime, ago, api, toast, formData, ft } from './lib.js';
+import { initNap, loadNap, loadWorkers } from './nap.js';
 
 const state = { config: null, mix: null, mixes: [], sensors: [], charts: {}, selectedJob: null, openRun: null };
 
@@ -40,7 +10,7 @@ function showTab(name) {
   $$('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
   $$('.tab').forEach((s) => (s.hidden = s.id !== `tab-${name}`));
   try { localStorage.setItem('tab', name); } catch {}
-  ({ gyartas: loadMixes, erleles: loadCuring, raktar: loadInventory, munkak: loadJobs })[name]?.();
+  ({ nap: loadNap, munkasok: loadWorkers, gyartas: loadMixes, erleles: loadCuring, raktar: loadInventory, munkak: loadJobs })[name]?.();
 }
 $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
@@ -52,7 +22,6 @@ document.addEventListener('click', (e) => {
   inp.value = Math.max(0, (parseFloat(inp.value) || 0) + parseFloat(b.dataset.step));
 });
 
-const formData = (form) => Object.fromEntries(new FormData(form).entries());
 
 // ===================================================================
 // Gyártás
@@ -264,6 +233,8 @@ function runHtml(r) {
     ${modeToggle()}
     <div class="chart-box"><canvas id="chart-${r.id}"></canvas></div>
 
+    ${r.poured_count ? `<p class="small">Öntve: <b>${r.poured_count} db</b> · kiforgatva: <b>${total} db</b>${
+      total < r.poured_count ? (r.ended_at ? ` · <span class="neg">hiányzik ${r.poured_count - total} db (selejt?)</span>` : ` · még ${r.poured_count - total} db a sablonban`) : ''}</p>` : ''}
     <h3>Raklapok ${pals.length ? `· ${pals.length} db, ${total} elem` : ''}</h3>
     <div class="list">${pals.map((p) => `<button class="item" data-open-serial="${esc(p.serial)}" type="button">
       <span><b>${esc(p.serial)}</b> · ${esc(p.template)} · ${p.panel_count} db</span>
@@ -706,6 +677,18 @@ async function showJob(id) {
   $('#jd-summary tbody').innerHTML = s.summary.map((x) => `<tr><td>${esc(x.item)}</td><td class="num">${x.needed}</td>
     <td class="num">${x.in_stock}</td><td class="num ${x.missing ? 'neg' : ''}">${x.missing}</td></tr>`).join('')
     || '<tr><td colspan="4" class="muted">Adj hozzá szakaszt.</td></tr>';
+  const ins = s.install;
+  const pct = ins.total_m ? Math.min(100, Math.round((ins.done_m / ins.total_m) * 100)) : 0;
+  $('#jd-install').innerHTML = `
+    <div class="bar ${pct >= 100 ? 'done' : ''}"><i style="width:${pct}%"></i></div>
+    <div class="kv">
+      <span>Kész: <b>${fmt(ins.done_m, 0)} / ${fmt(ins.total_m, 0)} m</b> (${pct}%)</span>
+      <span>Munkaóra: <b>${fmt(ins.hours, 1)} óra</b> · ${ins.work_days} nap</span>
+      <span>Bérköltség: <b>${ft(ins.cost)}</b></span>
+      <span>m / munkaóra: <b>${ins.hours ? fmt(ins.done_m / ins.hours, 1) : '–'}</b></span>
+    </div>
+    ${ins.days.length ? `<div class="list">${ins.days.map((d) => `<div class="item small"><span><b>${esc(d.day)}</b> · ${fmt(d.done_m, 0)} m</span><span class="muted">${esc(d.workers || '')}</span></div>`).join('')}</div>`
+      : '<p class="muted small">A telepítést a Napi lapon rögzítsd: Telepítés feladat ennél a projektnél.</p>'}`;
 }
 $('#jd-status').addEventListener('click', async () => {
   const j = state.selectedJob;
@@ -788,9 +771,10 @@ async function loadWeather() {
   $('#pour-template').innerHTML = state.config.templates.map((t) => `<option>${esc(t)}</option>`).join('');
   $('#stage-template').innerHTML = state.config.panelTemplates.map((t) => `<option>${esc(t)}</option>`).join('');
   $('#pallet-filter').innerHTML = '<option value="">Minden státusz</option>' + state.config.palletStatuses.map((s) => `<option>${esc(s)}</option>`).join('');
-  let tab = 'erleles';
+  await initNap(state.config);
+  let tab = 'nap';
   try { tab = localStorage.getItem('tab') || tab; } catch {}
-  if (!$(`.tabs button[data-tab="${tab}"]`) || $(`.tabs button[data-tab="${tab}"]`).hidden) tab = 'erleles';
+  if (!$(`.tabs button[data-tab="${tab}"]`) || $(`.tabs button[data-tab="${tab}"]`).hidden) tab = 'nap';
   showTab(tab);
   // ?s=… (új címkék; a Cloudflare-belépés után is megmarad) vagy #s=… (régi címkék)
   const qs = new URLSearchParams(location.search).get('s');

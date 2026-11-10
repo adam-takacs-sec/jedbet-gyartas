@@ -190,3 +190,37 @@ form.demold { margin-top: 12px; }
 th.sel, td.sel { width: 36px; padding-left: 2px; padding-right: 2px; text-align: center; }
 td.sel input, th.sel input { width: 20px; height: 20px; accent-color: var(--red); cursor: pointer; }
 #pallet-table tr.checked td { background: color-mix(in srgb, var(--red) 8%, transparent); }
+
+/* Napi lap */
+.day-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.day-nav input[type="date"] {
+  min-height: 44px; padding: 6px 10px; font: inherit; font-weight: 700; color: var(--ink);
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+}
+.day-title { font-weight: 600; color: var(--muted); text-transform: capitalize; }
+.row-btns.wrap { flex-wrap: wrap; }
+.btn.ghost { background: transparent; color: var(--muted); }
+.badge.plan { background: var(--line); color: var(--ink); }
+.task { border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: var(--input); }
+.task.st-folyamatban { border-left-color: var(--info); }
+.task.st-kesz { border-left-color: var(--ok); }
+.task.st-reszben { border-left-color: var(--warn); }
+.task.st-nem { border-left-color: var(--danger); }
+.task-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.task .qty-txt { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.task .row-btns .btn.sm { min-height: 38px; }
+.finish-form { margin-top: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.chip {
+  min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--input);
+  color: var(--ink); font: inherit; font-weight: 600; cursor: pointer;
+}
+.chip:hover { border-color: var(--red); }
+.log .row-btns { flex-shrink: 0; }
+textarea {
+  display: block; width: 100%; margin-top: 4px; padding: 8px 10px; font: inherit; font-size: 1rem; resize: vertical;
+  color: var(--ink); background: var(--input); border: 1px solid var(--line); border-radius: 8px;
+}
+label > select:disabled { opacity: .6; }
+#days-table tr.selected td { background: color-mix(in srgb, var(--red) 12%, transparent); }
+[hidden] { display: none !important; }

@@ -81,6 +81,7 @@ sudo tee /etc/systemd/system/jedbet-netwatch.timer >/dev/null <<'UNIT'
 Description=JEDBET hálózatfigyelő, percenként
 [Timer]
 OnBootSec=2min
+OnActiveSec=1min
 OnUnitActiveSec=1min
 AccuracySec=10s
 [Install]

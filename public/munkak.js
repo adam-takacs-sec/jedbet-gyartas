@@ -17,6 +17,8 @@ const stageCalc = (len) => {
   const spans = Math.max(1, Math.ceil(len / 2 - 1e-9));
   return { spans, panels: spans * 4, veg: 2, kozep: spans - 1 };
 };
+// A rajz a tényleges szélességre készül, így telefonon sem zsugorodnak olvashatatlanra a feliratok.
+const tvSize = () => { const w = Math.max(300, ($('#jd-overview')?.clientWidth || 760) - 2); return { maxW: Math.min(w, 900), maxH: w < 600 ? 360 : 420 }; };
 const turnLabel = (t) => (TURNS.find(([v]) => v === Number(t)) || [0, `${t}°`])[1].toLowerCase();
 const daysLeft = (d) => (d ? Math.round((Date.parse(`${d}T12:00:00`) - Date.now()) / 86400000) : null);
 
@@ -85,70 +87,83 @@ function layout(stages) {
   });
 }
 
-function topView(stages, { mini = false, highlight = null, maxW = 760, maxH = 420 } = {}) {
+function topView(stages, { mini = false, highlight = null, maxW = 760, maxH = 400 } = {}) {
   if (!stages.length) return '';
   const segs = layout(stages);
   const xs = segs.flatMap((s) => [s.x0, s.x1]), ys = segs.flatMap((s) => [s.y0, s.y1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const pad = mini ? 10 : 56;
-  const k = Math.min((maxW - 2 * pad) / Math.max(maxX - minX, 1), (maxH - 2 * pad) / Math.max(maxY - minY, 1), mini ? 12 : 28);
-  const W = Math.max((maxX - minX) * k + 2 * pad, mini ? 120 : 260), H = Math.max((maxY - minY) * k + 2 * pad, mini ? 40 : 120);
+  // Szűk helyen (telefon) a címke a vonalra kerül, így nem kell neki hely a rajz körül.
+  const onLine = !mini && maxW < 600;
+  const padX = mini ? 12 : onLine ? 50 : 110, padY = mini ? 12 : onLine ? 24 : 54;
+  const k = Math.min((maxW - 2 * padX) / Math.max(maxX - minX, 1), (maxH - 2 * padY) / Math.max(maxY - minY, 1), mini ? 14 : 30);
+  const W = Math.max((maxX - minX) * k + 2 * padX, mini ? 140 : 300), H = Math.max((maxY - minY) * k + 2 * padY, mini ? 50 : 150);
   const ox = (W - (maxX - minX) * k) / 2 - minX * k, oy = (H - (maxY - minY) * k) / 2 - minY * k;
   const P = (x, y) => [ox + x * k, oy + y * k];
-  const pw = mini ? 4 : Math.max(4, Math.min(9, 0.25 * k)); // panelvonal vastagsága
-  let lines = '', posts = '', labels = '';
-  // Telek-kitöltés, ha a vonal nagyjából körbeér.
-  const end = segs[segs.length - 1];
-  const closed = segs.length >= 3 && Math.hypot(end.x1 - segs[0].x0, end.y1 - segs[0].y0) < 0.25 * segs.reduce((a, s) => a + s.length_m, 0);
-  const poly = segs.map((s) => P(s.x0, s.y0).join(',')).concat([P(end.x1, end.y1).join(',')]).join(' ');
-  const fillPoly = segs.length >= 2 ? `<polygon points="${poly}" fill="${closed ? 'rgba(214,40,40,.05)' : 'none'}" stroke="none"/>` : '';
+  const T = mini ? 5 : Math.max(4, Math.min(12, 0.4 * k)); // kerítés vastagsága (px)
+  const midPosts = k >= 7; // ha túl sűrű lenne, csak a végoszlopokat rajzoljuk
+  const gap = mini ? 0 : Math.min(2, 0.08 * k); // rés a táblák között
+  const cx = xs.reduce((a, v) => a + v, 0) / xs.length, cy = ys.reduce((a, v) => a + v, 0) / ys.length; // „telek” közepe
 
-  for (const s of segs) {
+  // Telek: halvány kitöltés a vonal által bezárt területre.
+  const pts = segs.map((s) => P(s.x0, s.y0)).concat([P(segs.at(-1).x1, segs.at(-1).y1)]);
+  const perim = segs.reduce((a, x) => a + x.length_m, 0);
+  const closed = segs.length >= 3 && Math.hypot(segs.at(-1).x1 - segs[0].x0, segs.at(-1).y1 - segs[0].y0) < 0.15 * perim;
+  let out = closed ? `<polygon points="${pts.map((p) => p.join(',')).join(' ')}" fill="rgba(255,255,255,.035)" stroke="none"/>` : '';
+  let posts = '', badges = '';
+
+  segs.forEach((s, i) => {
     const done = Math.min(s.done_m || 0, s.length_m);
+    const dim = highlight !== null && highlight !== s.id ? ' opacity=".28"' : '';
     const at = (d) => P(s.x0 + s.dx * d, s.y0 + s.dy * d);
-    const dim = highlight !== null && highlight !== s.id ? ' opacity=".35"' : '';
-    const [ax, ay] = at(0), [bx, by] = at(s.length_m), [cx, cy] = at(done);
-    lines += `<g${dim}><line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${GREY}" stroke-width="${pw}" stroke-linecap="butt"/>`;
-    if (done > 0) lines += `<line x1="${ax}" y1="${ay}" x2="${cx}" y2="${cy}" stroke="${RED}" stroke-width="${pw}" stroke-linecap="butt"/>`;
-    if (highlight === s.id) lines += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#fff" stroke-opacity=".5" stroke-width="${pw + 6}" stroke-linecap="round" fill="none" style="mix-blend-mode:overlay"/>`;
-    lines += '</g>';
-    if (!mini) {
-      const spans = Math.max(1, Math.ceil(s.length_m / 2 - 1e-9));
-      for (let i = 0; i <= spans; i++) {
-        const d = Math.min(i * 2, s.length_m), isEnd = i === 0 || i === spans;
-        const [px, py] = at(d), sz = isEnd ? pw + 5 : pw + 2;
-        const col = d <= done + 1e-6 && done > 0 ? (isEnd ? RED_DARK : RED) : (isEnd ? '#d9dbde' : GREY_POST);
-        const rot = (Math.atan2(s.dy, s.dx) * 180) / Math.PI;
-        posts += `<rect${dim} x="${px - sz / 2}" y="${py - sz / 2}" width="${sz}" height="${sz}" fill="${col}" stroke="#1b1d20" stroke-width="1" transform="rotate(${rot} ${px} ${py})"/>`;
-      }
-      // Felirat a szakasz közepénél, a vonal mellett (kifelé), olvasható irányban.
-      const [mx, my] = at(s.length_m / 2);
-      let ang = (Math.atan2(s.dy, s.dx) * 180) / Math.PI;
-      const flip = ang > 90 || ang < -90;
-      if (flip) ang += 180;
-      const nx = s.dy, ny = -s.dx; // bal oldali normális (a menetirányhoz képest kifelé, ha jobbra fordulunk)
-      const off = pw / 2 + 7;
-      const tx = mx + nx * off, ty = my + ny * off;
-      const name = `${s.stage_name} · ${fmt(s.length_m, s.length_m % 1 ? 1 : 0)} m`;
-      const sub = done >= s.length_m - 1e-6 ? 'kész' : done > 0 ? `${fmt(done, 0)} / ${fmt(s.length_m, 0)} m kész` : esc(s.template);
-      labels += `<g${dim} transform="translate(${tx} ${ty}) rotate(${ang})"><text text-anchor="middle" y="${flip ? 23 : -15}" font-size="12" font-weight="700" fill="var(--ink)">${esc(name)}</text>
-        <text text-anchor="middle" y="${flip ? 10 : -2}" font-size="10" fill="${done > 0 ? RED : 'var(--muted)'}" font-weight="${done > 0 ? 700 : 400}">${sub}</text></g>`;
+    const rot = (Math.atan2(s.dy, s.dx) * 180) / Math.PI;
+    const spans = Math.max(1, Math.ceil(s.length_m / 2 - 1e-9));
+    let g = '';
+    for (let j = 0; j < spans; j++) {
+      const d0 = j * 2, d1 = Math.min(s.length_m, (j + 1) * 2);
+      const [x0, y0] = at(d0);
+      const len = (d1 - d0) * k;
+      const full = d1 <= done + 1e-6, part = !full && done > d0;
+      g += `<g transform="translate(${x0} ${y0}) rotate(${rot})"><rect x="${gap}" y="${-T / 2}" width="${Math.max(1, len - 2 * gap)}" height="${T}" rx="${mini ? 1 : 2}" fill="${full ? RED : '#7b8087'}"/>`;
+      if (part) g += `<rect x="${gap}" y="${-T / 2}" width="${Math.max(1, (done - d0) * k - gap)}" height="${T}" rx="2" fill="${RED}"/>`;
+      g += '</g>';
     }
-  }
-  // Léptékvonal
+    out += `<g${dim}>${g}</g>`;
+    if (mini) return;
+    for (let j = 0; j <= spans; j++) {
+      const d = Math.min(j * 2, s.length_m), isEnd = j === 0 || j === spans;
+      if (j === 0 && i > 0) continue; // a csatlakozó oszlopot az előző szakasz már kirajzolta
+      if (!isEnd && !midPosts) continue;
+      const [px, py] = at(d), sz = T + (isEnd ? 6 : 3);
+      const isDone = done > 0 && d <= done + 1e-6;
+      posts += `<rect${dim} x="${px - sz / 2}" y="${py - sz / 2}" width="${sz}" height="${sz}" rx="1.5" fill="${isDone ? '#8f1414' : '#d6d8db'}" stroke="${isDone ? '#ff8a8a' : '#16181b'}" stroke-width="${isDone ? 1 : 1.5}" transform="rotate(${rot} ${px} ${py})"/>`;
+    }
+    // Címke a szakasz közepénél, a telek közepétől elfelé, vízszintesen.
+    const [mx, my] = at(s.length_m / 2);
+    let nx = -s.dy, ny = s.dx;
+    const midX = s.x0 + s.dx * s.length_m / 2, midY = s.y0 + s.dy * s.length_m / 2;
+    if ((midX + nx - cx) ** 2 + (midY + ny - cy) ** 2 < (midX - nx - cx) ** 2 + (midY - ny - cy) ** 2) { nx = -nx; ny = -ny; }
+    const complete = done >= s.length_m - 1e-6;
+    const txt = done > 0 && !complete ? `${fmt(done, 0)}/${fmt(s.length_m, 0)} m` : `${fmt(s.length_m, s.length_m % 1 ? 1 : 0)} m`;
+    const tw = 32 + txt.length * 6.6;
+    const reach = Math.abs(nx) * tw / 2 + Math.abs(ny) * 12; // a címke fél kiterjedése a normális irányában
+    const off = onLine ? 0 : T / 2 + 8 + reach;
+    const lx = mx + nx * off, ly = my + ny * off;
+    badges += `<g${dim} transform="translate(${lx.toFixed(1)} ${ly.toFixed(1)})">
+      <rect x="${-tw / 2}" y="-12" width="${tw}" height="24" rx="12" fill="${complete ? RED : '#2c3035'}" stroke="${done > 0 ? RED : '#4a4e54'}" stroke-width="1.5"/>
+      <circle cx="${-tw / 2 + 12}" cy="0" r="9" fill="${complete ? '#fff' : done > 0 ? RED : '#55595f'}"/>
+      <text x="${-tw / 2 + 12}" y="3.8" text-anchor="middle" font-size="11" font-weight="800" fill="${complete ? RED : '#fff'}">${i + 1}</text>
+      <text x="${-tw / 2 + 26}" y="4" font-size="11.5" font-weight="700" fill="#fff">${txt}</text></g>`;
+  });
+
   let scale = '';
   if (!mini) {
-    const nice = [1, 2, 5, 10, 20, 50, 100].find((m) => m * k >= 60) || 100;
-    const sx = 14, sy = H - 14;
-    scale = `<g><path d="M${sx} ${sy - 4}V${sy}H${sx + nice * k}V${sy - 4}" stroke="var(--muted)" fill="none" stroke-width="1.2"/>
+    const nice = [1, 2, 5, 10, 20, 50, 100].find((m) => m * k >= 50) || 100;
+    const sx = 16, sy = H - 16;
+    scale = `<g opacity=".7"><rect x="${sx}" y="${sy - 4}" width="${nice * k}" height="4" fill="none" stroke="var(--muted)" stroke-width="1"/>
+      <rect x="${sx}" y="${sy - 4}" width="${nice * k / 2}" height="4" fill="var(--muted)"/>
       <text x="${sx + nice * k + 6}" y="${sy}" font-size="10" fill="var(--muted)">${nice} m</text></g>`;
-    // Kezdőpont jelölése
-    const [s0x, s0y] = P(segs[0].x0, segs[0].y0);
-    scale += `<circle cx="${s0x}" cy="${s0y}" r="${pw / 2 + 6}" fill="none" stroke="var(--muted)" stroke-dasharray="2 2"/>`;
   }
-  return `<svg class="topview ${mini ? 'mini' : ''}" viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}" role="img" aria-label="Kerítés felülnézetből">
-    ${mini ? '' : '<defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="var(--line)" stroke-width=".5"/></pattern></defs><rect width="100%" height="100%" fill="url(#grid)" opacity=".6"/>'}
-    ${fillPoly}${lines}${posts}${labels}${scale}</svg>`;
+  return `<svg class="topview ${mini ? 'mini' : ''}" viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}" role="img" aria-label="Kerítés felülnézetből">${out}${posts}${badges}${scale}</svg>`;
 }
 
 // ===================================================================
@@ -223,13 +238,13 @@ async function showJob(id, scroll) {
     <span>Középoszlop <b>${t.kozep}</b></span>`;
   const doneTotal = s.stages.reduce((a, x) => a + x.done_m, 0);
   const pctAll = t.m ? Math.round((doneTotal / t.m) * 100) : 0;
-  $('#jd-overview').innerHTML = s.stages.length ? `<div class="topview-wrap">${topView(s.stages, { highlight: js.hover ?? null })}</div>
-    <div class="legend small muted"><span><i class="lg tv-grey"></i>még nincs kész</span><span><i class="lg tv-red"></i>telepítve (${fmt(doneTotal, 0)} m, ${pctAll}%)</span><span>■ oszlop 2 m-enként, a nagyobb a végoszlop</span><span>◌ kezdőpont</span></div>` : '';
+  $('#jd-overview').innerHTML = s.stages.length ? `<div class="topview-wrap">${topView(s.stages, { highlight: js.hover ?? null, ...tvSize() })}</div>
+    <div class="tv-legend"><span><i class="lg tv-grey"></i>hátra van: <b>${fmt(t.m - doneTotal, 0)} m</b></span><span><i class="lg tv-red"></i>kész: <b>${fmt(doneTotal, 0)} m</b> (${pctAll}%)</span></div>` : '';
 
   $('#jd-stages').innerHTML = s.stages.map((x, i) => {
     const pct = Math.round((x.done_m / x.length_m) * 100);
     return `<div class="stage-row" data-stage="${x.id}" style="--c:${tpl(x.template).accent}">
-      <span class="stage-no ${pct >= 100 ? 'ok' : ''}">${pct >= 100 ? '✓' : i + 1}</span>
+      <span class="stage-no ${pct >= 100 ? 'ok' : pct > 0 ? 'part' : ''}">${i + 1}</span>
       <div class="stage-info"><div><b>${esc(x.stage_name)}</b> <span class="tpl-chip">${esc(x.template)}</span>
         ${i > 0 ? `<span class="muted small">${esc(turnLabel(x.turn))}</span>` : ''}</div>
         <div class="muted small">${fmt(x.length_m, x.length_m % 1 ? 1 : 0)} m · ${x.spans} köz · <b>${x.panels} panel</b> · ${x.veg} vég + ${x.kozep} közép oszlop${x.note ? ' · ' + esc(x.note) : ''}</div>
@@ -288,13 +303,14 @@ $('#job-detail').addEventListener('click', async (e) => {
 });
 $('#stage-new').addEventListener('click', () => openStage(null));
 $('#jd-stages').addEventListener('mouseover', (e) => {
+  if (!matchMedia('(hover: hover)').matches) return;
   const r = e.target.closest('[data-stage]');
   const id = r ? +r.dataset.stage : null;
   if (id === js.hover || !js.detail) return;
   js.hover = id;
-  $('.topview-wrap').innerHTML = topView(js.detail.stages, { highlight: id });
+  $('.topview-wrap').innerHTML = topView(js.detail.stages, { highlight: id, ...tvSize() });
 });
-$('#jd-stages').addEventListener('mouseleave', () => { js.hover = null; if (js.detail?.stages.length) $('.topview-wrap').innerHTML = topView(js.detail.stages); });
+$('#jd-stages').addEventListener('mouseleave', () => { js.hover = null; if (js.detail?.stages.length) $('.topview-wrap').innerHTML = topView(js.detail.stages, tvSize()); });
 $$('[data-close-dialog]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 
 $('#job-form').addEventListener('submit', async (e) => {
@@ -333,7 +349,7 @@ function previewStage() {
   const me = { id: -1, stage_name: f.stage_name.value || 'Új szakasz', length_m: len, template: f.template.value, turn: Number(f.turn.value), done_m: 0 };
   const others = js.detail?.stages || [];
   const list = js.editingStage ? others.map((x) => (x.id === js.editingStage.id ? { ...me, id: x.id, done_m: x.done_m } : x)) : [...others, me];
-  $('#stage-preview').innerHTML = `${topView(list, { highlight: js.editingStage ? js.editingStage.id : -1, maxW: 520, maxH: 260 })}
+  $('#stage-preview').innerHTML = `${topView(list, { highlight: js.editingStage ? js.editingStage.id : -1, maxW: Math.max(300, ($('#stage-preview').clientWidth || 520) - 26), maxH: 280 })}
     <p class="small">${c.spans} oszlopköz · <b>${c.panels} panel</b> · ${c.veg} végoszlop + ${c.kozep} középoszlop${len % 2 ? ` <span class="muted">(az utolsó köz ${fmt(len - 2 * (c.spans - 1), 1)} m)</span>` : ''}</p>`;
 }
 $('#stage-form').addEventListener('input', previewStage);

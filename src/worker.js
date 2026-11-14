@@ -10,6 +10,8 @@ const POUR_STATUSES = ['Kötés alatt', 'Raktározott', 'Lefoglalt', 'Beépítve
 const PALLET_STATUSES = ['Raktáron', 'Lefoglalt', 'Kiszállítva', 'Selejt'];
 const MATERIALS = { cement: 'Cement', viz: 'Víz', kavics: 'Kavics', folyosito: 'Folyósító', kalcidur: 'Kalcidur' };
 const SITE = { lat: 47.65, lon: 17.92 }; // Bana
+// Okos dugaljak: azonosító → meta kulcs előtag (a fűtőé a korábbi „heater”, hogy megmaradjon az állapota).
+const PLUGS = { futo: 'heater', venti: 'fan' };
 
 // ---------------------------------------------------------------------------
 // Belépő
@@ -483,13 +485,15 @@ async function routeApi(request, env, url, user) {
     return json(await jobSummary(db, +r[1]));
   }
 
-  // --- Fűtés (Shelly a Pi-n keresztül) ---
-  if (p === '/api/heater' && m === 'GET') return json(await heaterState(db));
-  if (p === '/api/heater' && m === 'POST') {
+  // --- Okos dugaljak (Shelly a Pi-n keresztül): fűtő, ventilátor ---
+  if (p === '/api/plugs' && m === 'GET') return json(await plugsState(db));
+  if ((r = p.match(/^\/api\/plugs\/(\w+)$/)) && m === 'POST') {
+    const key = PLUGS[r[1]];
+    if (!key) notFound();
     const b = await body(request);
     if (typeof b.on !== 'boolean') bad('Érvénytelen érték: on');
-    await setMeta(db, 'heater_desired', { on: b.on, at: new Date().toISOString(), by: user.email });
-    return json(await heaterState(db));
+    await setMeta(db, `${key}_desired`, { on: b.on, at: new Date().toISOString(), by: user.email });
+    return json(await plugsState(db));
   }
 
   // --- Szenzorok, érlelés ---
@@ -782,17 +786,25 @@ async function routeDevice(request, env, url) {
     return json({ accepted: valid.length, rejected: list.length - valid.length });
   }
 
-  // A Pi 10 mp-enként jelenti a fűtő Shelly állapotát, és válaszul megkapja, mi a kért állapot.
-  if (p === '/device/heater' && m === 'POST') {
+  // A Pi 10 mp-enként jelenti a dugaljak állapotát, és válaszul megkapja, mi a kért állapot.
+  // Új ügynök: /device/plugs { futo: {...}, venti: {...} }; régi ügynök: /device/heater {...} (csak fűtő).
+  if ((p === '/device/plugs' || p === '/device/heater') && m === 'POST') {
     const b = await body(request);
-    await setMeta(db, 'heater_actual', {
-      on: typeof b.on === 'boolean' ? b.on : null,
-      apower: Number.isFinite(b.apower) ? b.apower : null,
-      error: str(b.error, 'hiba', { max: 300 }),
-      at: new Date().toISOString(),
-    });
-    const d = await getMeta(db, 'heater_desired');
-    return json({ on: !!d?.on });
+    const reports = p === '/device/heater' ? { futo: b } : b;
+    const out = {};
+    for (const [id, key] of Object.entries(PLUGS)) {
+      const x = reports[id];
+      if (x && typeof x === 'object') {
+        await setMeta(db, `${key}_actual`, {
+          on: typeof x.on === 'boolean' ? x.on : null,
+          apower: Number.isFinite(x.apower) ? x.apower : null,
+          error: str(x.error, 'hiba', { max: 300 }),
+          at: new Date().toISOString(),
+        });
+      }
+      out[id] = !!(await getMeta(db, `${key}_desired`))?.on;
+    }
+    return json(p === '/device/heater' ? { on: out.futo } : out);
   }
 
   if (p === '/device/print-jobs/next' && m === 'GET') {
@@ -833,7 +845,11 @@ async function setMeta(db, key, value) {
   await db.prepare(`INSERT INTO meta (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(key, JSON.stringify(value)).run();
 }
-async function heaterState(db) {
-  const [desired, actual] = await Promise.all([getMeta(db, 'heater_desired'), getMeta(db, 'heater_actual')]);
-  return { desired: desired || { on: false }, actual };
+async function plugsState(db) {
+  const out = {};
+  for (const [id, key] of Object.entries(PLUGS)) {
+    const [desired, actual] = await Promise.all([getMeta(db, `${key}_desired`), getMeta(db, `${key}_actual`)]);
+    out[id] = { desired: desired || { on: false }, actual };
+  }
+  return out;
 }

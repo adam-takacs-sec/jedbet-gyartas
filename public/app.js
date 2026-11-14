@@ -183,41 +183,46 @@ $('#sensor-settings').addEventListener('submit', async (e) => {
   toast('Szenzor mentve'); loadCuring();
 });
 
-// --- Fűtés ---
-function renderHeater(h) {
-  state.heater = h;
-  const want = !!h.desired?.on;
-  const a = h.actual;
-  const btn = $('#heater-btn');
-  btn.disabled = false;
-  btn.textContent = want ? 'Fűtés kikapcsolása' : 'Fűtés bekapcsolása';
-  btn.className = 'btn ' + (want ? '' : 'primary');
-  const parts = [`Kért: <b>${want ? 'BE' : 'KI'}</b>`];
-  if (!a) parts.push('A Pi még nem jelentett.');
-  else {
-    const old = Date.now() - Date.parse(a.at) > 60000;
-    parts.push(a.on === null ? 'Tényleges: ismeretlen' : `Tényleges: <b>${a.on ? 'BE' : 'KI'}</b>${a.on ? `, ${fmt(a.apower, 0)} W` : ''}`);
-    if (old) parts.push(`<span class="neg">⚠ A Pi ${ago(a.at)} jelentett utoljára</span>`);
-    if (a.error) parts.push(`<span class="neg">⚠ ${esc(a.error)}</span>`);
-    if (!old && a.on !== null && a.on !== want) parts.push('(átállítás folyamatban…)');
+// --- Okos dugaljak: fűtő, ventilátor ---
+const PLUG_NAMES = { futo: 'Fűtés', venti: 'Ventilátor' };
+function renderPlugs(all) {
+  state.plugs = all;
+  for (const [id, h] of Object.entries(all)) {
+    const want = !!h.desired?.on;
+    const a = h.actual;
+    const btn = $(`.plug-btn[data-plug="${id}"]`);
+    if (!btn) continue;
+    btn.disabled = false;
+    btn.textContent = `${PLUG_NAMES[id]} ${want ? 'kikapcsolása' : 'bekapcsolása'}`;
+    btn.className = 'btn plug-btn' + (want ? '' : ' primary');
+    const parts = [`Kért: <b>${want ? 'BE' : 'KI'}</b>`];
+    if (!a) parts.push('A Pi még nem jelentett.');
+    else {
+      const old = Date.now() - Date.parse(a.at) > 60000;
+      parts.push(a.on === null ? 'Tényleges: ismeretlen' : `Tényleges: <b>${a.on ? 'BE' : 'KI'}</b>${a.on ? `, ${fmt(a.apower, 0)} W` : ''}`);
+      if (old) parts.push(`<span class="neg">⚠ A Pi ${ago(a.at)} jelentett utoljára</span>`);
+      if (a.error) parts.push(`<span class="neg">⚠ ${esc(a.error)}</span>`);
+      if (!old && a.on !== null && a.on !== want) parts.push('(átállítás folyamatban…)');
+    }
+    $(`.plug-status[data-plug="${id}"]`).innerHTML = parts.join(' · ');
   }
-  $('#heater-status').innerHTML = parts.join(' · ');
 }
-async function loadHeater() {
-  try { renderHeater(await api('/api/heater', { quiet: true })); }
-  catch { $('#heater-status').textContent = 'A fűtés állapota nem érhető el.'; }
+async function loadPlugs() {
+  try { renderPlugs(await api('/api/plugs', { quiet: true })); }
+  catch { $$('.plug-status').forEach((el) => (el.textContent = 'Az állapot nem érhető el.')); }
 }
-$('#heater-btn').addEventListener('click', async () => {
-  const on = !state.heater?.desired?.on;
-  $('#heater-btn').disabled = true;
+$$('.plug-btn').forEach((btn) => btn.addEventListener('click', async () => {
+  const id = btn.dataset.plug;
+  const on = !state.plugs?.[id]?.desired?.on;
+  btn.disabled = true;
   try {
-    renderHeater(await api('/api/heater', { method: 'POST', body: { on } }));
-    toast(on ? 'Fűtés bekapcsolva, a Pi 10 mp-en belül átállítja' : 'Fűtés kikapcsolva');
-  } finally { $('#heater-btn').disabled = false; }
-});
+    renderPlugs(await api(`/api/plugs/${id}`, { method: 'POST', body: { on } }));
+    toast(`${PLUG_NAMES[id]} ${on ? 'bekapcsolva' : 'kikapcsolva'}, a Pi 10 mp-en belül átállítja`);
+  } finally { btn.disabled = false; }
+}));
 
 async function loadCuring() {
-  loadHeater();
+  loadPlugs();
   await loadSensors();
   const [runs, pallets] = await Promise.all([api('/api/curing'), api('/api/pallets')]);
   state.pallets = pallets;
@@ -753,5 +758,5 @@ async function loadWeather() {
   loadStatus(); loadWeather();
   setInterval(loadStatus, 30000);
   setInterval(() => { if (!$('#tab-erleles').hidden && !document.hidden) loadCuring(); }, 120000);
-  setInterval(() => { if (!$('#tab-erleles').hidden && !document.hidden) loadHeater(); }, 10000);
+  setInterval(() => { if (!$('#tab-erleles').hidden && !document.hidden) loadPlugs(); }, 10000);
 })();

@@ -183,7 +183,41 @@ $('#sensor-settings').addEventListener('submit', async (e) => {
   toast('Szenzor mentve'); loadCuring();
 });
 
+// --- Fűtés ---
+function renderHeater(h) {
+  state.heater = h;
+  const want = !!h.desired?.on;
+  const a = h.actual;
+  const btn = $('#heater-btn');
+  btn.disabled = false;
+  btn.textContent = want ? 'Fűtés kikapcsolása' : 'Fűtés bekapcsolása';
+  btn.className = 'btn ' + (want ? '' : 'primary');
+  const parts = [`Kért: <b>${want ? 'BE' : 'KI'}</b>`];
+  if (!a) parts.push('A Pi még nem jelentett.');
+  else {
+    const old = Date.now() - Date.parse(a.at) > 60000;
+    parts.push(a.on === null ? 'Tényleges: ismeretlen' : `Tényleges: <b>${a.on ? 'BE' : 'KI'}</b>${a.on ? `, ${fmt(a.apower, 0)} W` : ''}`);
+    if (old) parts.push(`<span class="neg">⚠ A Pi ${ago(a.at)} jelentett utoljára</span>`);
+    if (a.error) parts.push(`<span class="neg">⚠ ${esc(a.error)}</span>`);
+    if (!old && a.on !== null && a.on !== want) parts.push('(átállítás folyamatban…)');
+  }
+  $('#heater-status').innerHTML = parts.join(' · ');
+}
+async function loadHeater() {
+  try { renderHeater(await api('/api/heater', { quiet: true })); }
+  catch { $('#heater-status').textContent = 'A fűtés állapota nem érhető el.'; }
+}
+$('#heater-btn').addEventListener('click', async () => {
+  const on = !state.heater?.desired?.on;
+  $('#heater-btn').disabled = true;
+  try {
+    renderHeater(await api('/api/heater', { method: 'POST', body: { on } }));
+    toast(on ? 'Fűtés bekapcsolva, a Pi 10 mp-en belül átállítja' : 'Fűtés kikapcsolva');
+  } finally { $('#heater-btn').disabled = false; }
+});
+
 async function loadCuring() {
+  loadHeater();
   await loadSensors();
   const [runs, pallets] = await Promise.all([api('/api/curing'), api('/api/pallets')]);
   state.pallets = pallets;
@@ -719,4 +753,5 @@ async function loadWeather() {
   loadStatus(); loadWeather();
   setInterval(loadStatus, 30000);
   setInterval(() => { if (!$('#tab-erleles').hidden && !document.hidden) loadCuring(); }, 120000);
+  setInterval(() => { if (!$('#tab-erleles').hidden && !document.hidden) loadHeater(); }, 10000);
 })();

@@ -7,6 +7,10 @@ Két dolgot csinál, mást semmit:
      és visszatöltődik, amint újra van kapcsolat.
   2. Pár másodpercenként megnézi, van-e nyomtatandó címke, és ha van,
      kinyomtatja a niimbot_b1.py-jal.
+  3. 10 másodpercenként jelenti a fűtő Shelly állapotát, és beállítja az
+     oldalon kért állapotot. Bekapcsoláskor a Shelly 2 perces visszaszámlálót
+     kap, amit minden kör megújít: ha a Pi vagy a net kiesik, a fűtő magától
+     lekapcsol.
 
 Csak kifelé kapcsolódik (HTTPS), nem nyit portot. Csak a Python standard
 könyvtárát használja.
@@ -16,6 +20,7 @@ Beállítás: /home/admin/jedbet-agent.env
   DEVICE_TOKEN=...
   PRINTER_PORT=/dev/rfcomm0        (opcionális; USB-n /dev/ttyACM0)
   NIIMCTL=/home/admin/niimbot_b1.py   (opcionális)
+  SHELLY_HEATER=192.168.1.201       (opcionális; üresen hagyva nincs fűtésvezérlés)
 """
 import base64
 import glob
@@ -28,6 +33,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
@@ -36,6 +42,8 @@ ENV_FILE = os.environ.get("JEDBET_ENV", os.path.join(HOME, "jedbet-agent.env"))
 BUFFER_DB = os.path.join(HOME, "jedbet-buffer.sqlite")
 SAMPLE_SEC = 300
 PRINT_POLL_SEC = 4
+HEATER_POLL_SEC = 10
+HEATER_SAFETY_SEC = 120   # ennyi idő után kapcsol le a fűtő, ha nem jön megújítás
 W1_GLOB = os.environ.get("JEDBET_W1_GLOB", "/sys/bus/w1/devices/28-*")
 SAMPLE_SEC = int(os.environ.get("JEDBET_SAMPLE_SEC", SAMPLE_SEC))
 
@@ -61,6 +69,7 @@ def load_env():
     cfg["API_URL"] = cfg["API_URL"].rstrip("/")
     cfg.setdefault("PRINTER_PORT", "/dev/rfcomm0")
     cfg.setdefault("NIIMCTL", os.path.join(HOME, "niimbot_b1.py"))
+    cfg.setdefault("SHELLY_HEATER", "192.168.1.201")
     return cfg
 
 
@@ -204,7 +213,46 @@ def handle_print(job):
         log("visszajelzés sikertelen:", e)
 
 
+# --------------------------------------------------------------------------
+# Fűtés (Shelly Plug, helyi hálózaton)
+# --------------------------------------------------------------------------
+def shelly(method, **params):
+    q = urllib.parse.urlencode({k: (str(v).lower() if isinstance(v, bool) else v) for k, v in params.items()})
+    url = f"http://{CFG['SHELLY_HEATER']}/rpc/{method}?{q}"
+    with urllib.request.urlopen(url, timeout=5) as res:
+        return json.loads(res.read() or b"null")
+
+
+def heater_loop():
+    last_err = None
+    while True:
+        try:
+            st = shelly("Switch.GetStatus", id=0)
+            actual = {"on": bool(st.get("output")), "apower": st.get("apower"),
+                      "error": ",".join(st.get("errors") or [])}
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            actual = {"on": None, "apower": None, "error": f"Shelly nem elérhető: {e}"}
+        try:
+            _, resp = request("POST", "/device/heater", actual, timeout=10)
+            want = bool(resp and resp.get("on"))
+            if want:
+                shelly("Switch.Set", id=0, on=True, toggle_after=HEATER_SAFETY_SEC)
+            elif actual.get("on"):
+                shelly("Switch.Set", id=0, on=False)
+            if want != actual.get("on"):
+                log("fűtés:", "BE" if want else "KI")
+            last_err = None
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            # Nem újítjuk meg a visszaszámlálót: a fűtő HEATER_SAFETY_SEC múlva magától lekapcsol.
+            if str(e) != last_err:
+                log("fűtés: hiba:", e)
+            last_err = str(e)
+        time.sleep(HEATER_POLL_SEC)
+
+
 if __name__ == "__main__":
     log("JEDBET ügynök indul →", CFG["API_URL"])
     threading.Thread(target=print_loop, daemon=True).start()
+    if CFG["SHELLY_HEATER"]:
+        threading.Thread(target=heater_loop, daemon=True).start()
     sensor_loop()

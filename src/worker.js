@@ -483,6 +483,15 @@ async function routeApi(request, env, url, user) {
     return json(await jobSummary(db, +r[1]));
   }
 
+  // --- Fűtés (Shelly a Pi-n keresztül) ---
+  if (p === '/api/heater' && m === 'GET') return json(await heaterState(db));
+  if (p === '/api/heater' && m === 'POST') {
+    const b = await body(request);
+    if (typeof b.on !== 'boolean') bad('Érvénytelen érték: on');
+    await setMeta(db, 'heater_desired', { on: b.on, at: new Date().toISOString(), by: user.email });
+    return json(await heaterState(db));
+  }
+
   // --- Szenzorok, érlelés ---
   if (p === '/api/sensors' && m === 'GET') {
     const { results } = await db.prepare(
@@ -773,6 +782,19 @@ async function routeDevice(request, env, url) {
     return json({ accepted: valid.length, rejected: list.length - valid.length });
   }
 
+  // A Pi 10 mp-enként jelenti a fűtő Shelly állapotát, és válaszul megkapja, mi a kért állapot.
+  if (p === '/device/heater' && m === 'POST') {
+    const b = await body(request);
+    await setMeta(db, 'heater_actual', {
+      on: typeof b.on === 'boolean' ? b.on : null,
+      apower: Number.isFinite(b.apower) ? b.apower : null,
+      error: str(b.error, 'hiba', { max: 300 }),
+      at: new Date().toISOString(),
+    });
+    const d = await getMeta(db, 'heater_desired');
+    return json({ on: !!d?.on });
+  }
+
   if (p === '/device/print-jobs/next' && m === 'GET') {
     // A 2 percnél régebben „nyomtatás alatt” ragadt munkát újra kiadjuk (max. 3 próba).
     const job = await db.prepare(
@@ -799,3 +821,19 @@ async function routeDevice(request, env, url) {
   notFound();
 }
 
+
+// ---------------------------------------------------------------------------
+// Fűtés
+// ---------------------------------------------------------------------------
+async function getMeta(db, key) {
+  const row = await db.prepare('SELECT value FROM meta WHERE key = ?').bind(key).first();
+  return row ? JSON.parse(row.value) : null;
+}
+async function setMeta(db, key, value) {
+  await db.prepare(`INSERT INTO meta (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(key, JSON.stringify(value)).run();
+}
+async function heaterState(db) {
+  const [desired, actual] = await Promise.all([getMeta(db, 'heater_desired'), getMeta(db, 'heater_actual')]);
+  return { desired: desired || { on: false }, actual };
+}

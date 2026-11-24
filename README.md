@@ -50,9 +50,9 @@ Pi (jedbet_agent.py) ── HTTPS ───────┘  /device/readings, /d
 
 ## Élő nézet (családnak)
 
-- `jedbet.xyz/device/elo?k=<kulcs>`: egyszerű, mobilra szabott, csak olvasható oldal (hőmérséklet, fűtés, kötés %, 6 órás grafikon), 30 mp-enként frissül.
+- `https://doboz.jedbet.xyz/<kulcs>` (régi forma: `jedbet.xyz/device/elo?k=<kulcs>`): egyszerű, mobilra szabott, csak olvasható oldal (hőmérséklet, fűtés, kötés %, 6 órás grafikon), 30 mp-enként frissül.
 - A link a Kötés fülön (Automatikus vezérlés → Élő nézet a családnak) hozható létre, cserélhető, megszüntethető. A kulcs a `meta.live_key`-ben van.
-- A `/device/*` Access-bypass miatt nem kell hozzá új Access-szabály; a Pi tokenjével nem érhető el, és a Pi végpontjai sem a kulccsal.
+- A `doboz.jedbet.xyz` aldomain nincs Access mögött, és ott a Worker csak az élő nézetet szolgálja ki; a Pi tokenjével nem érhető el, és a Pi végpontjai sem a kulccsal.
 
 ## Beállítás
 

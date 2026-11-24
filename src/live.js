@@ -123,7 +123,9 @@ const HTML = `<!DOCTYPE html>
   <p class="foot" id="foot"></p>
 </main>
 <script>
-const key = new URLSearchParams(location.search).get('k') || '';
+const OLD = location.pathname.startsWith('/device/elo');
+const key = OLD ? new URLSearchParams(location.search).get('k') || '' : location.pathname.replace(/^[/]+|[/]+$/g, '');
+const DATA = OLD ? '/device/elo/data?k=' + encodeURIComponent(key) : '/' + encodeURIComponent(key) + '/data';
 const $ = (id) => document.getElementById(id);
 const f1 = (n) => n === null || n === undefined ? '–' : n.toLocaleString('hu-HU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const hm = (d) => new Date(d).toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' });
@@ -146,7 +148,7 @@ function arc(cx, cy, r, a0, a1) {
 function gauge(temp, target) {
   const LO = 0, HI = 45, A0 = -125, A1 = 125, cx = 120, cy = 118, r = 96;
   const ang = (v) => A0 + (Math.max(LO, Math.min(HI, v)) - LO) / (HI - LO) * (A1 - A0);
-  let s = '<defs><linearGradient id="gg" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="' + css('--cool') + '"/><stop offset=".55" stop-color="#f08c00"/><stop offset="1" stop-color="' + css('--red') + '"/></linearGradient></defs>';
+  let s = '<defs><linearGradient id="gg" gradientUnits="userSpaceOnUse" x1="' + (cx - r) + '" x2="' + (cx + r) + '" y1="0" y2="0"><stop offset="0" stop-color="' + css('--cool') + '"/><stop offset=".55" stop-color="#f08c00"/><stop offset="1" stop-color="' + css('--red') + '"/></linearGradient></defs>';
   s += '<path d="' + arc(cx, cy, r, A0, A1) + '" fill="none" stroke="' + css('--track') + '" stroke-width="14" stroke-linecap="round"/>';
   if (temp !== null) s += '<path d="' + arc(cx, cy, r, A0, Math.max(A0 + 0.5, ang(temp))) + '" fill="none" stroke="url(#gg)" stroke-width="14" stroke-linecap="round"/>';
   if (target !== null && target !== undefined) {
@@ -164,9 +166,8 @@ function chart(pts, target) {
   if (!pts.length) { svg.innerHTML = '<text x="160" y="80" text-anchor="middle" font-size="13" fill="' + css('--mut') + '">Még nincs adat</text>'; return; }
   const W = 320, H = 150, L = 26, R = 6, T = 8, B = 22;
   const t1 = Date.now(), t0 = t1 - 6 * 3600e3;
-  const vs = pts.map((p) => p.t);
+  const vs = pts.map((p) => p.t).concat(pts.filter((p) => p.g !== null && p.g !== undefined).map((p) => p.g));
   let lo = Math.min(...vs), hi = Math.max(...vs);
-  if (target !== null && target !== undefined) { lo = Math.min(lo, target); hi = Math.max(hi, target); }
   const step = hi - lo > 20 ? 10 : 5;
   lo = Math.floor((lo - 1) / step) * step; hi = Math.ceil((hi + 1) / step) * step;
   const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R), y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
@@ -178,7 +179,12 @@ function chart(pts, target) {
   let s = '<defs><linearGradient id="ca" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="' + warm + '" stop-opacity=".28"/><stop offset="1" stop-color="' + warm + '" stop-opacity="0"/></linearGradient></defs>';
   for (let v = lo; v <= hi; v += step) s += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="' + line + '"/><text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end" font-size="10" fill="' + mut + '">' + v + '°</text>';
   for (let h = 6; h >= 0; h -= 2) { const t = t1 - h * 3600e3; s += '<text x="' + x(t) + '" y="' + (H - 5) + '" text-anchor="' + (h === 0 ? 'end' : h === 6 ? 'start' : 'middle') + '" font-size="10" fill="' + mut + '">' + (h === 0 ? 'most' : hm(t)) + '</text>'; }
-  if (target !== null && target !== undefined) s += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(target) + '" y2="' + y(target) + '" stroke="' + mut + '" stroke-width="1.5" stroke-dasharray="4 4"/>';
+  let gd = '', pen = false;
+  for (const p of pts) {
+    if (p.g === null || p.g === undefined) { pen = false; continue; }
+    gd += (pen ? ' L' : ' M') + x(Date.parse(p.ts)).toFixed(1) + ' ' + y(p.g).toFixed(1); pen = true;
+  }
+  if (gd) s += '<path d="' + gd + '" fill="none" stroke="' + mut + '" stroke-width="1.5" stroke-dasharray="4 4" stroke-linejoin="round"/>';
   s += '<path d="' + area + '" fill="url(#ca)"/><path d="' + d + '" fill="none" stroke="' + warm + '" stroke-width="2.5" stroke-linecap="round"/>';
   const lp = P[P.length - 1]; s += '<circle cx="' + lp[0] + '" cy="' + lp[1] + '" r="4" fill="' + warm + '" stroke="' + css('--card') + '" stroke-width="2"/>';
   svg.innerHTML = s;
@@ -192,7 +198,7 @@ function etaText(hours) {
 
 async function load() {
   try {
-    const r = await fetch('/device/elo/data?k=' + encodeURIComponent(key), { cache: 'no-store' });
+    const r = await fetch(DATA, { cache: 'no-store' });
     if (r.status === 403) { $('st').innerHTML = 'Ez a link már nem érvényes.<small>Kérj újat Ádámtól.</small>'; $('live').className = 'live off'; $('live-t').textContent = 'Nem elérhető'; return; }
     const d = await r.json();
     lastOk = Date.now();

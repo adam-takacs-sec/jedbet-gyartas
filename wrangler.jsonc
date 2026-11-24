@@ -7,7 +7,11 @@
   // mert az megkerülné a belépést.
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [{ "pattern": "jedbet.xyz", "custom_domain": true }],
+  "routes": [
+    { "pattern": "jedbet.xyz", "custom_domain": true },
+    // Élő nézet a családnak: külön aldomain, nincs Access mögött, csak a titkos kulccsal működik.
+    { "pattern": "doboz.jedbet.xyz", "custom_domain": true }
+  ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

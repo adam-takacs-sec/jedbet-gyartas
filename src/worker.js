@@ -1,7 +1,7 @@
 import { computeMaturity, hoursToTarget } from './maturity.js';
 import { TEMPLATES, PANEL_TEMPLATES, TZ, HttpError, bad, notFound, json, body, num, str, localDate, localDateTime } from './util.js';
 import { routeNap, HOURS_SQL } from './napi.js';
-import { BOX_DEFAULTS, cleanSettings, decide, PHASE_NAMES } from './box.js';
+import { BOX_DEFAULTS, cleanSettings, decide, phaseAt, PHASE_NAMES } from './box.js';
 import { livePage } from './live.js';
 
 // ---------------------------------------------------------------------------
@@ -22,6 +22,15 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
+      // doboz.jedbet.xyz: csak az élő nézet, semmi más (/<kulcs> és /<kulcs>/data).
+      if (url.hostname === LIVE_HOST) {
+        const m = url.pathname.match(/^\/([\w-]{8,64})(\/data)?\/?$/);
+        if (request.method !== 'GET' || !m) return new Response('Nem található.', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+        if (!(await liveKeyOk(env.DB, m[1]))) {
+          return m[2] ? json({ error: 'forbidden' }, 403) : new Response('Ez a link nem érvényes.', { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+        }
+        return m[2] ? json(await liveData(env.DB)) : livePage();
+      }
       // Élő nézet a családnak: saját kulccsal, a Pi tokenje nélkül.
       if (url.pathname === '/device/elo' || url.pathname === '/device/elo/data') {
         if (request.method !== 'GET') return json({ error: 'method' }, 405);
@@ -54,6 +63,8 @@ export default {
 };
 
 const STATION_SENSOR = 'nubila-allomas';
+const LIVE_HOST = 'doboz.jedbet.xyz';
+const liveUrl = (key) => `https://${LIVE_HOST}/${key}`;
 
 // A saját állomás legfrissebb mérése az eszköz sorozatszáma alapján:
 //   GET https://api.nubila.ai/api/v1/weather/device/{SN}?limit=1   (Authorization: Bearer <token>)
@@ -521,15 +532,20 @@ async function routeApi(request, env, url, user) {
   // --- Élő nézet link (családnak) ---
   if (p === '/api/live-link' && m === 'GET') {
     const k = await getMeta(db, 'live_key');
-    return json({ url: k ? `${url.origin}/device/elo?k=${k.key}` : null });
+    return json({ url: k ? liveUrl(k.key) : null });
   }
   if (p === '/api/live-link' && m === 'POST') {
     const b = await body(request);
     if (b.disable === true) { await db.prepare(`DELETE FROM meta WHERE key = 'live_key'`).run(); return json({ url: null }); }
-    const bytes = crypto.getRandomValues(new Uint8Array(18));
-    const key = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    // Rövid, de kitalálhatatlan kulcs: 10 karakter a-z, A-Z, 0-9 közül (~59 bit).
+    const ABC = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let key = '';
+    while (key.length < 10) {
+      const b = crypto.getRandomValues(new Uint8Array(1))[0];
+      if (b < 256 - (256 % ABC.length)) key += ABC[b % ABC.length];
+    }
     await setMeta(db, 'live_key', { key, at: new Date().toISOString(), by: user.email });
-    return json({ url: `${url.origin}/device/elo?k=${key}` });
+    return json({ url: liveUrl(key) });
   }
 
   // --- Kötődoboz automatika ---
@@ -1014,7 +1030,7 @@ async function boxState(db) {
 // Élő nézet (src/live.js)
 // ---------------------------------------------------------------------------
 async function liveKeyOk(db, k) {
-  if (typeof k !== 'string' || k.length < 16 || k.length > 64) return false;
+  if (typeof k !== 'string' || k.length < 8 || k.length > 64) return false;
   const want = (await getMeta(db, 'live_key'))?.key;
   if (!want || want.length !== k.length) return false;
   let diff = 0;
@@ -1051,7 +1067,20 @@ async function liveData(db) {
   }
   const mins = [...byMin.values()];
   const r1 = (x) => Math.round(x * 10) / 10;
-  let series = mins.map((a) => ({ ts: a.ts, t: r1(a.sum / a.n) }));
+  // A cél, ahogy az automatika akkor számolta (a mostani beállításokkal visszaszámolva),
+  // csak az automatika indulása óta.
+  const s = active ? await boxSettings(db) : null;
+  const autoFrom = active ? Date.parse(ctl.at) : Infinity;
+  const goalAt = (iso) => {
+    const t = Date.parse(iso);
+    if (!run || t < autoFrom) return null;
+    const cool = ctl.cool_started_at && t >= Date.parse(ctl.cool_started_at) ? ctl.cool_started_at : null;
+    const rampOn = ctl.ramp_started_at && t >= Date.parse(ctl.ramp_started_at);
+    const g = phaseAt({ s, startedAt: run.started_at, now: t, coolStartedAt: cool,
+      rampStartedAt: rampOn ? ctl.ramp_started_at : null, rampBase: rampOn ? ctl.ramp_base ?? null : null }).target;
+    return g === null ? null : r1(g);
+  };
+  let series = mins.map((a) => ({ ts: a.ts, t: r1(a.sum / a.n), g: goalAt(a.ts) }));
   if (series.length > 180) series = thin(series, 180);
   const last = mins[mins.length - 1] || null;
   const stale = !last || Date.now() - Date.parse(last.ts) > 5 * 60000;

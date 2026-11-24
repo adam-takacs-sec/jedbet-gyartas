@@ -271,6 +271,28 @@ $('#box-settings').addEventListener('submit', async (e) => {
   const body = Object.fromEntries(BOX_FIELDS.map((k) => [k, f[k].value]));
   renderBox(await api('/api/box/settings', { method: 'POST', body })); toast('Beállítások mentve');
 });
+// --- Élő nézet link ---
+function renderLive(url) {
+  state.liveUrl = url;
+  $('#live-link').innerHTML = url ? `<a href="${esc(url)}" target="_blank" rel="noopener" style="word-break:break-all">${esc(url)}</a>` : '<span class="muted">Nincs aktív link.</span>';
+  $('#live-new').textContent = url ? 'Új link (a régi megszűnik)' : 'Link létrehozása';
+  $('#live-copy').hidden = $('#live-off').hidden = !url;
+}
+$('#live-box').addEventListener('toggle', async (e) => {
+  if (e.target.open) renderLive((await api('/api/live-link')).url);
+});
+$('#live-new').addEventListener('click', async () => {
+  if (state.liveUrl && !confirm('Új linket kérsz? Akinek a régi megvan, annál nem fog működni.')) return;
+  renderLive((await api('/api/live-link', { method: 'POST', body: {} })).url); toast('Link kész');
+});
+$('#live-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(state.liveUrl); toast('Link másolva'); }
+  catch { prompt('Másold ki:', state.liveUrl); }
+});
+$('#live-off').addEventListener('click', async () => {
+  if (!confirm('Megszünteted a linket? Utána senki nem látja az élő nézetet.')) return;
+  renderLive((await api('/api/live-link', { method: 'POST', body: { disable: true } })).url); toast('Link megszüntetve');
+});
 $('#box-defaults').addEventListener('click', () => {
   const f = $('#box-settings');
   for (const k of BOX_FIELDS) f[k].value = state.box?.defaults?.[k] ?? '';

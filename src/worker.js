@@ -2,6 +2,7 @@ import { computeMaturity, hoursToTarget } from './maturity.js';
 import { TEMPLATES, PANEL_TEMPLATES, TZ, HttpError, bad, notFound, json, body, num, str, localDate, localDateTime } from './util.js';
 import { routeNap, HOURS_SQL } from './napi.js';
 import { BOX_DEFAULTS, cleanSettings, decide, PHASE_NAMES } from './box.js';
+import { livePage } from './live.js';
 
 // ---------------------------------------------------------------------------
 // Beállítások
@@ -21,6 +22,14 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
+      // Élő nézet a családnak: saját kulccsal, a Pi tokenje nélkül.
+      if (url.pathname === '/device/elo' || url.pathname === '/device/elo/data') {
+        if (request.method !== 'GET') return json({ error: 'method' }, 405);
+        if (!(await liveKeyOk(env.DB, url.searchParams.get('k')))) {
+          return url.pathname === '/device/elo' ? new Response('Ez a link nem érvényes.', { status: 403 }) : json({ error: 'forbidden' }, 403);
+        }
+        return url.pathname === '/device/elo' ? livePage() : json(await liveData(env.DB));
+      }
       if (url.pathname.startsWith('/device/')) {
         if (!deviceAuthorized(request, env)) return json({ error: 'unauthorized' }, 401);
         return await routeDevice(request, env, url);
@@ -509,6 +518,20 @@ async function routeApi(request, env, url, user) {
     return json(await plugsState(db));
   }
 
+  // --- Élő nézet link (családnak) ---
+  if (p === '/api/live-link' && m === 'GET') {
+    const k = await getMeta(db, 'live_key');
+    return json({ url: k ? `${url.origin}/device/elo?k=${k.key}` : null });
+  }
+  if (p === '/api/live-link' && m === 'POST') {
+    const b = await body(request);
+    if (b.disable === true) { await db.prepare(`DELETE FROM meta WHERE key = 'live_key'`).run(); return json({ url: null }); }
+    const bytes = crypto.getRandomValues(new Uint8Array(18));
+    const key = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    await setMeta(db, 'live_key', { key, at: new Date().toISOString(), by: user.email });
+    return json({ url: `${url.origin}/device/elo?k=${key}` });
+  }
+
   // --- Kötődoboz automatika ---
   if (p === '/api/box' && m === 'GET') return json(await boxState(db));
   if (p === '/api/box/settings' && m === 'POST') {
@@ -983,5 +1006,71 @@ async function boxState(db) {
     last: ctl?.run_id ? ctl.last || null : null,
     phase_name: ctl?.run_id && ctl.last ? PHASE_NAMES[ctl.last.phase] : null,
     stopped_at: ctl?.stopped_at || null, stopped_by: ctl?.stopped_by || null,
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// Élő nézet (src/live.js)
+// ---------------------------------------------------------------------------
+async function liveKeyOk(db, k) {
+  if (typeof k !== 'string' || k.length < 16 || k.length > 64) return false;
+  const want = (await getMeta(db, 'live_key'))?.key;
+  if (!want || want.length !== k.length) return false;
+  let diff = 0;
+  for (let i = 0; i < k.length; i++) diff |= k.charCodeAt(i) ^ want.charCodeAt(i);
+  return diff === 0;
+}
+
+async function liveData(db) {
+  const ctl = await getMeta(db, 'box_control');
+  const active = !!ctl?.run_id;
+  const run = active ? await db.prepare('SELECT * FROM curing_runs WHERE id = ?').bind(ctl.run_id).first() : null;
+  const { results: sensors } = await db.prepare(
+    `SELECT id, offset_c FROM sensors WHERE role = 'air' AND active = 1 AND id != ?`).bind(STATION_SENSOR).all();
+  const ids = run ? new Set(JSON.parse(run.sensor_ids)) : null;
+  let box = ids ? sensors.filter((x) => ids.has(x.id)) : [];
+  if (!box.length) box = sensors;
+  const off = Object.fromEntries(box.map((x) => [x.id, x.offset_c]));
+
+  const since = new Date(Date.now() - 6 * 3600000).toISOString();
+  let rows = [];
+  if (box.length) {
+    ({ results: rows } = await db.prepare(
+      `SELECT sensor_id, ts, temp FROM readings WHERE sensor_id IN (${box.map(() => '?').join(',')}) AND ts >= ? ORDER BY ts`)
+      .bind(...box.map((x) => x.id), since).all());
+  }
+  // Percenkénti átlag a doboz szenzoraiból.
+  const byMin = new Map();
+  for (const r of rows) {
+    const k = r.ts.slice(0, 16);
+    const a = byMin.get(k) || { ts: r.ts, sum: 0, n: 0, vals: [] };
+    const v = r.temp + (off[r.sensor_id] || 0);
+    a.sum += v; a.n += 1; a.vals.push(v);
+    byMin.set(k, a);
+  }
+  const mins = [...byMin.values()];
+  const r1 = (x) => Math.round(x * 10) / 10;
+  let series = mins.map((a) => ({ ts: a.ts, t: r1(a.sum / a.n) }));
+  if (series.length > 180) series = thin(series, 180);
+  const last = mins[mins.length - 1] || null;
+  const stale = !last || Date.now() - Date.parse(last.ts) > 5 * 60000;
+
+  let progress = ctl?.progress ?? null, hours_left = null, ready = false;
+  if (run) {
+    const st = await runStatus(db, run, false);
+    progress = st.progress; hours_left = st.hours_left; ready = st.ready;
+  }
+  const outside = await db.prepare(
+    `SELECT temp, ts FROM readings WHERE sensor_id = ? ORDER BY ts DESC LIMIT 1`).bind(STATION_SENSOR).first();
+  const l = active ? ctl.last || {} : {};
+  return {
+    active, phase: l.phase || null, target: l.target ?? null,
+    heater: !!(active && l.heater), fan: !!(active && l.fan),
+    temp: last ? r1(last.sum / last.n) : null, min: last ? r1(Math.min(...last.vals)) : null,
+    max: last ? r1(Math.max(...last.vals)) : null, temp_at: last ? last.ts : null, stale,
+    progress, hours_left, ready,
+    outside: outside && Date.now() - Date.parse(outside.ts) < 2 * 3600000 ? outside.temp : null,
+    series,
   };
 }

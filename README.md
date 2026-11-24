@@ -48,6 +48,12 @@ Pi (jedbet_agent.py) ── HTTPS ───────┘  /device/readings, /d
 - Kézi kapcsolás vagy a kötés lezárása leállítja az automatikát.
 - Ehhez a Pi percenként mér (`SAMPLE_SEC=60`).
 
+## Élő nézet (családnak)
+
+- `jedbet.xyz/device/elo?k=<kulcs>`: egyszerű, mobilra szabott, csak olvasható oldal (hőmérséklet, fűtés, kötés %, 6 órás grafikon), 30 mp-enként frissül.
+- A link a Kötés fülön (Automatikus vezérlés → Élő nézet a családnak) hozható létre, cserélhető, megszüntethető. A kulcs a `meta.live_key`-ben van.
+- A `/device/*` Access-bypass miatt nem kell hozzá új Access-szabály; a Pi tokenjével nem érhető el, és a Pi végpontjai sem a kulccsal.
+
 ## Beállítás
 
 Worker → Settings → Variables and Secrets:

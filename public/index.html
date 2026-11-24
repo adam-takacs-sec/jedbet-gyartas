@@ -191,6 +191,12 @@
           </form>
           <p class="muted small">A fűtő a doboz <b>leghidegebb</b> levegő-szenzorát viszi fel a célra (a kültéri Nubila-állomás nem számít). Ha a legmelegebb pont eléri a maximumot, a fűtő szünetel, amíg a hő szétterül; ha 5 °C-kal a maximum fölé megy, a ventilátor is kiszellőztet. Ha 3 percig nincs friss mérés, a fűtő kikapcsol. Ha a Pi vagy a net kiesik, a Shelly 2 perc múlva magától lekapcsol.</p>
         </details>
+        <details class="sub" id="live-box">
+          <summary>Élő nézet a családnak (link, belépés nélkül)</summary>
+          <p class="muted small">Egyszerű, telefonra szabott oldal: hőmérséklet, fűtés, a kötés állása. Csak nézni lehet, kapcsolni nem. Aki megkapja a linket, belépés nélkül látja; ha új linket kérsz, a régi megszűnik.</p>
+          <div id="live-link" class="small"></div>
+          <div class="row-btns"><button class="btn primary sm" id="live-new" type="button">Link létrehozása</button><button class="btn sm" id="live-copy" type="button" hidden>Másolás</button><button class="btn sm" id="live-off" type="button" hidden>Link megszüntetése</button></div>
+        </details>
       </div>
 
       <div class="card">

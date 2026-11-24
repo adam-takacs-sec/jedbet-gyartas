@@ -753,13 +753,16 @@ async function runStatus(db, run, withSeries) {
       nurse_saul: mt.nurseSaul, eq_age_h: mt.eqAgeH, elapsed_h: mt.elapsedH,
       covered_h: mt.coveredH, gaps: mt.gaps, min_temp: mt.minTemp,
       last_temp: mt.lastTemp, last_ts: mt.lastTs,
-      hours_left: s.role === 'specimen' ? hoursToTarget(mt.eqAgeH, run.target_te_h, mt.lastTemp) : null,
+      hours_left: s.id !== STATION_SENSOR ? hoursToTarget(mt.eqAgeH, run.target_te_h, mt.lastTemp) : null,
     };
     if (withSeries) item.series = thin(mt.series, 600);
     out.push(item);
   }
-  // A döntést a legkevésbé érett próbatest adja.
-  const specimens = out.filter((x) => x.role === 'specimen' && x.last_ts);
+  // A döntést a legkevésbé érett próbatest adja. Ha a kötésben nincs próbatest, a doboz
+  // leghidegebb (legkevésbé érett) levegő-szenzora; a kültéri állomás sosem.
+  let specimens = out.filter((x) => x.role === 'specimen' && x.last_ts);
+  const airFallback = !specimens.length;
+  if (airFallback) specimens = out.filter((x) => x.role === 'air' && x.sensor_id !== STATION_SENSOR && x.last_ts);
   const governing = specimens.length ? specimens.reduce((a, b) => (a.eq_age_h <= b.eq_age_h ? a : b)) : null;
   const ready = governing ? governing.eq_age_h >= run.target_te_h : false;
   const coldest = specimens.length ? Math.min(...specimens.map((x) => x.min_temp)) : null;
@@ -770,7 +773,7 @@ async function runStatus(db, run, withSeries) {
     eq_age_h: governing ? governing.eq_age_h : 0,
     progress: governing ? Math.min(1, governing.eq_age_h / run.target_te_h) : 0,
     hours_left: governing ? governing.hours_left : null,
-    ready, frost,
+    ready, frost, air_fallback: airFallback && !!governing,
   };
 }
 

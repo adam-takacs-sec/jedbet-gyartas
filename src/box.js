@@ -9,21 +9,24 @@
 //   hűtés      cool_h ideig          fűtő ki, ventilátor be
 //   kész       minden ki, lehet kiforgatni
 //
-// Termosztát a doboz levegő-szenzoraira (a kültéri Nubila-állomás nem számít):
-// bekapcsol, ha a levegő ≤ cél − hyst_c; kikapcsol, ha ≥ cél + 0,5 °C; köztük marad, ahogy volt.
-// Biztonság: ha nincs friss levegőmérés, vagy a levegő eléri a max_air_c-t, a fűtő KI
-// (túlmelegedésnél a ventilátor BE). A Pi oldalon a Shelly 2 perces önlekapcsolója is véd.
+// Termosztát a doboz levegő-szenzoraira (a kültéri Nubila-állomás nem számít), a LEGHIDEGEBB
+// pontra szabályoz: bekapcsol, ha a leghidegebb ≤ cél − hyst_c; kikapcsol, ha ≥ cél + 0,5 °C.
+// A legmelegebb pont korlátoz: ha eléri a max_air_c-t, a fűtő szünetel (ventilátor nélkül, hogy
+// a hő szétterüljön), és csak max_air_c − 1 °C alatt indul újra. Vészhelyzet: ha a legmelegebb
+// eléri a max_air_c + EMERGENCY_C-t, a ventilátor is bekapcsol (kiszellőztet).
+// Ha nincs friss levegőmérés, a fűtő KI. A Pi oldalon a Shelly 2 perces önlekapcsolója is véd.
 
 export const BOX_DEFAULTS = {
   delay_h: 3,          // öntés után ennyi ideig nem fűtünk (csak fagyvédelem)
   min_c: 10,           // fagyvédelem: a várakozás alatt is legalább ennyi legyen
   ramp_c_per_h: 12,    // felfűtés sebessége
   hold_c: 32,          // tartási hőmérséklet
-  max_air_c: 40,       // e fölött a fűtő biztosan KI, a ventilátor BE
+  max_air_c: 40,       // ha a legmelegebb pont eléri, a fűtő szünetel
   hyst_c: 1,           // bekapcsolási hiszterézis
   cool_h: 1,           // hűtés hossza a küszöb elérése után
 };
-export const STALE_MIN = 3; // ennél régebbi levegőmérés = nincs adat → fűtő KI
+export const STALE_MIN = 3;
+export const EMERGENCY_C = 5;  // max_air_c fölött ennyivel: ventilátor BE // ennél régebbi levegőmérés = nincs adat → fűtő KI
 
 const LIMITS = {
   delay_h: [0, 24], min_c: [0, 25], ramp_c_per_h: [1, 30], hold_c: [15, 45],
@@ -65,27 +68,31 @@ export function phaseAt({ s, startedAt, now, coolStartedAt }) {
  * @param {string|null} a.coolStartedAt
  * @param {{temp:number, ts:string}[]} a.air   a doboz levegő-szenzorainak utolsó mérése
  * @param {boolean} a.heaterWasOn
- * @returns {{phase, target, air, heater:boolean, fan:boolean, reason:string}}
+ * @returns {{phase, target, air, air_min, air_max, heater:boolean, fan:boolean, reason:string}}
  */
 export function decide({ s, startedAt, now, coolStartedAt, air, heaterWasOn }) {
   const { phase, target } = phaseAt({ s, startedAt, now, coolStartedAt });
   const fresh = air.filter((x) => Number.isFinite(x.temp) && now - Date.parse(x.ts) <= STALE_MIN * 60000);
-  const airT = fresh.length ? Math.round((fresh.reduce((a, x) => a + x.temp, 0) / fresh.length) * 10) / 10 : null;
-  const hottest = fresh.length ? Math.max(...fresh.map((x) => x.temp)) : null;
-  const base = { phase, target, air: airT };
+  const r1 = (x) => Math.round(x * 10) / 10;
+  const coldest = fresh.length ? r1(Math.min(...fresh.map((x) => x.temp))) : null;
+  const hottest = fresh.length ? r1(Math.max(...fresh.map((x) => x.temp))) : null;
+  const base = { phase, target, air: coldest, air_min: coldest, air_max: hottest };
 
   if (phase === 'hutes') return { ...base, heater: false, fan: true, reason: 'Hűtés a kiforgatás előtt' };
   if (phase === 'kesz') return { ...base, heater: false, fan: false, reason: 'Kész, kiforgatható' };
-  if (hottest !== null && hottest >= s.max_air_c) {
-    return { ...base, heater: false, fan: true, reason: `Túlmelegedés: ${hottest} °C ≥ ${s.max_air_c} °C` };
-  }
-  if (airT === null) {
+  if (coldest === null) {
     return { ...base, heater: false, fan: false, reason: `Nincs friss levegőmérés (${STALE_MIN} percen belül), a fűtő biztonságból KI` };
   }
+  if (hottest >= s.max_air_c + EMERGENCY_C) {
+    return { ...base, heater: false, fan: true, reason: `Túlmelegedés: ${hottest} °C, szellőztet` };
+  }
+  if (hottest >= s.max_air_c || (!heaterWasOn && hottest > s.max_air_c - 1)) {
+    return { ...base, heater: false, fan: false, reason: `A legmelegebb pont ${hottest} °C, a fűtő szünetel, amíg a hő szétterül` };
+  }
   let heater = heaterWasOn;
-  if (airT <= target - s.hyst_c) heater = true;
-  else if (airT >= target + 0.5) heater = false;
-  return { ...base, heater, fan: false, reason: heater ? 'Fűt' : 'A cél felett vagy körül, nem fűt' };
+  if (coldest <= target - s.hyst_c) heater = true;
+  else if (coldest >= target + 0.5) heater = false;
+  return { ...base, heater, fan: false, reason: heater ? 'Fűt (a leghidegebb pont a cél alatt)' : 'A leghidegebb pont a célon, nem fűt' };
 }
 
 export const PHASE_NAMES = {

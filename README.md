@@ -43,8 +43,8 @@ Pi (jedbet_agent.py) ── HTTPS ───────┘  /device/readings, /d
 
 - Egy kötés vezérelheti a dobozt (új kötésnél jelölőnégyzet, vagy a kötés „Automatika ezen a kötésen” gombja). Állapota a `meta` táblában: `box_control`, beállításai: `box_settings`.
 - Fázisok a kötés kezdetétől: **várakozás** (alapból 3 óra, csak fagyvédelem 10 °C-ig) → **felfűtés** (12 °C/óra) → **tartás** (32 °C), amíg a döntő próbatest el nem éri a küszöböt → **hűtés** (1 óra, ventilátor) → **kész**.
-- A döntés a Pi 10 mp-es dugalj-jelentésénél születik (`/device/plugs`), a doboz levegő-szenzora alapján (a Nubila-állomás nem számít). Bekapcsol ≤ cél − 1 °C-nál, kikapcsol ≥ cél + 0,5 °C-nál.
-- Biztonság: 3 percnél régebbi levegőmérésnél a fűtő KI; 40 °C felett fűtő KI, ventilátor BE; a Shelly a Pi kiesésekor 2 perc múlva magától lekapcsol.
+- A döntés a Pi 10 mp-es dugalj-jelentésénél születik (`/device/plugs`), a doboz levegő-szenzorai alapján (a Nubila-állomás nem számít). Ha a kötésben nincs próbatest, a küszöböt a leghidegebb levegő-szenzor érettsége adja.
+- A leghidegebb levegő-szenzorra szabályoz; ha a legmelegebb eléri a 40 °C-ot, a fűtő szünetel, 45 °C-nál a ventilátor is BE. 3 percnél régebbi mérésnél a fűtő KI; a Shelly a Pi kiesésekor 2 perc múlva magától lekapcsol.
 - Kézi kapcsolás vagy a kötés lezárása leállítja az automatikát.
 - Ehhez a Pi percenként mér (`SAMPLE_SEC=60`).
 

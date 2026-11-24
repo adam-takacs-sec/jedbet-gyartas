@@ -184,12 +184,12 @@
             <label>Fagyvédelem: legalább (°C)<input name="min_c" type="number" step="any" min="0" max="25"></label>
             <label>Felfűtés (°C/óra)<input name="ramp_c_per_h" type="number" step="any" min="1" max="30"></label>
             <label>Tartás (°C)<input name="hold_c" type="number" step="any" min="15" max="45"></label>
-            <label>Biztonsági maximum, levegő (°C)<input name="max_air_c" type="number" step="any" min="25" max="60"></label>
+            <label>Legmelegebb pont max. (°C, e fölött szünetel)<input name="max_air_c" type="number" step="any" min="25" max="60"></label>
             <label>Hiszterézis (°C)<input name="hyst_c" type="number" step="any" min="0.2" max="5"></label>
             <label>Hűtés a küszöb után (óra)<input name="cool_h" type="number" step="any" min="0" max="6"></label>
             <div class="row-btns"><button class="btn primary" type="submit">Mentés</button><button class="btn" type="button" id="box-defaults">Alapértékek</button></div>
           </form>
-          <p class="muted small">A szabályozás a doboz <b>levegő</b> szerepű szenzorát figyeli (a kültéri Nubila-állomást nem). Ha 3 percig nincs friss mérése, vagy eléri a maximumot, a fűtő kikapcsol. Ha a Pi vagy a net kiesik, a Shelly 2 perc múlva magától lekapcsol.</p>
+          <p class="muted small">A fűtő a doboz <b>leghidegebb</b> levegő-szenzorát viszi fel a célra (a kültéri Nubila-állomás nem számít). Ha a legmelegebb pont eléri a maximumot, a fűtő szünetel, amíg a hő szétterül; ha 5 °C-kal a maximum fölé megy, a ventilátor is kiszellőztet. Ha 3 percig nincs friss mérés, a fűtő kikapcsol. Ha a Pi vagy a net kiesik, a Shelly 2 perc múlva magától lekapcsol.</p>
         </details>
       </div>
 

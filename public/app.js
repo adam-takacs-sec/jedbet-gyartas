@@ -242,7 +242,9 @@ function renderBox(b) {
       const old = Date.now() - Date.parse(l.at) > 60000;
       parts.push(`Fázis: <b>${esc(b.phase_name)}</b>`);
       if (l.target !== null) parts.push(`Cél: <b>${fmt(l.target, 1)} °C</b>`);
-      parts.push(`Levegő: <b>${l.air === null ? '–' : fmt(l.air, 1) + ' °C'}</b>`);
+      parts.push(l.air_max === undefined || l.air_max === null || l.air_max === l.air
+        ? `Levegő: <b>${l.air === null ? '–' : fmt(l.air, 1) + ' °C'}</b>`
+        : `Levegő: <b>${fmt(l.air_min, 1)} – ${fmt(l.air_max, 1)} °C</b> (leghidegebb – legmelegebb)`);
       parts.push(`Fűtő: <b>${l.heater ? 'BE' : 'KI'}</b>, ventilátor: <b>${l.fan ? 'BE' : 'KI'}</b>`);
       if (b.progress !== null) parts.push(`Kötés: <b>${Math.min(100, Math.round(b.progress * 100))}%</b>`);
       const warn = /Nincs friss|Túlmeleg/.test(l.reason);
@@ -321,6 +323,7 @@ function runHtml(r) {
         ? `<span>${esc(s.label)} (levegő): <b>${fmt(s.last_temp, 1)} °C</b> · min. ${fmt(s.min_temp, 1)} °C</span>`
         : `<span>${esc(s.label)}: <b>${fmt(s.last_temp, 1)} °C</b> · ${fmt(s.eq_age_h, 1)} ó · NS ${fmt(s.nurse_saul, 0)} °C·h</span>`).join('')}
     </div>`}
+    ${r.air_fallback ? '<p class="small muted">Nincs próbatest-szenzor, ezért a doboz leghidegebb levegő-szenzora dönt. A beton a levegőnél lassabban melegszik, ezért ez becslés.</p>' : ''}
     ${gaps.length && chartMode === 'simple' ? '<p class="small neg">Volt adatkiesés; a részletes nézetben látszik, mikor.</p>' : ''}
     ${gaps.length && chartMode === 'detail' ? `<p class="small neg">Adatkiesés: ${gaps.map((g) => `${esc(g.label)} ${fmtTime(g.from)} – ${fmtTime(g.to)} (${g.minutes} perc)`).join('; ')}. Ezalatt az érettség nem nőtt, vagyis az érték óvatos.</p>` : ''}
     ${modeToggle()}

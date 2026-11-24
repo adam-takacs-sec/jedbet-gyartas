@@ -84,7 +84,9 @@ async function fetchNubila(env) {
   if (!sn) return { error: 'Nincs beállítva a NUBILA_DEVICE_SN' };
   let token = await nubilaToken(env);
   if (!token) return { error: 'Nincs Nubila-belépés (NUBILA_EMAIL + NUBILA_PASSWORD) vagy -token' };
-  const url = `https://api.nubila.ai/api/v1/weather/device/${encodeURIComponent(sn)}?limit=1`;
+  // A „limit” paramétert a Nubila figyelmen kívül hagyja, és a listát NEM időrendben adja
+  // (hőmérséklet szerint rendezve jön), ezért mindent lekérünk, és mi rendezzük idő szerint.
+  const url = `https://api.nubila.ai/api/v1/weather/device/${encodeURIComponent(sn)}?limit=50`;
   let res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
   if (res && res.status === 401) {
     const fresh = await nubilaToken(env, { force: true });
@@ -98,15 +100,18 @@ async function fetchNubila(env) {
     return { error: res ? (res.status === 401 ? 'A Nubila elutasította a belépést' : `Nubila hiba (${res.status})`) : 'Nubila nem elérhető', token_expires };
   }
   const body = await res.json().catch(() => null);
-  const d = Array.isArray(body?.data) ? body.data[0] : Array.isArray(body) ? body[0] : body?.data;
-  if (!d || !Number.isFinite(Number(d.temperature))) return { error: 'Nubila: nincs mérés a válaszban', token_expires };
+  const raw = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : body?.data ? [body.data] : [];
   const n = (v) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
-  return {
-    temp: Number(d.temperature), humidity: n(d.humidity), wind_speed: n(d.wind_speed),
-    wind_direction: n(d.wind_direction), pressure: n(d.pressure), rain: n(d.rain),
-    ts: d.created_at ? new Date(d.created_at).toISOString() : null,
-    token_expires,
-  };
+  const list = raw
+    .filter((d) => d && Number.isFinite(Number(d.temperature)) && !Number.isNaN(Date.parse(d.created_at)))
+    .map((d) => ({
+      temp: Number(d.temperature), humidity: n(d.humidity), wind_speed: n(d.wind_speed),
+      wind_direction: n(d.wind_direction), pressure: n(d.pressure), rain: n(d.rain),
+      ts: new Date(d.created_at).toISOString(),
+    }))
+    .sort((a, b) => (a.ts < b.ts ? 1 : -1)); // legfrissebb elöl
+  if (!list.length) return { error: 'Nubila: nincs mérés a válaszban', token_expires };
+  return { ...list[0], history: list, token_expires };
 }
 
 function jwtExp(token) {
@@ -119,14 +124,19 @@ function jwtExp(token) {
 async function logStation(env) {
   const w = await fetchNubila(env);
   if (!w || w.error) { if (w) console.warn(w.error); return; }
-  // Az állomás saját mérési idejét használjuk, így ugyanazt a mérést nem mentjük kétszer.
-  const ts = new Date(w.ts || Date.now());
-  ts.setUTCSeconds(0, 0);
-  if (Date.now() - ts.getTime() > 60 * 60000) { console.warn('Nubila: elavult mérés', w.ts); return; }
+  // Az állomás kiesés után csomagban tölt fel, ezért a válasz összes mérését mentjük
+  // (az utolsó 6 órából), az állomás saját idejével, másodpercre kerekítve; a kettőzést a
+  // (sensor_id, ts) kulcs kiszűri.
+  const since = Date.now() - 6 * 3600000;
+  const rows = w.history.filter((x) => Date.parse(x.ts) >= since);
+  if (!rows.length) { console.warn('Nubila: nincs friss mérés, utolsó:', w.ts); return; }
   await env.DB.batch([
     env.DB.prepare(`INSERT OR IGNORE INTO sensors (id, label, role) VALUES (?, 'Nubila állomás', 'air')`).bind(STATION_SENSOR),
-    env.DB.prepare('INSERT OR IGNORE INTO readings (sensor_id, ts, temp) VALUES (?,?,?)')
-      .bind(STATION_SENSOR, ts.toISOString(), Math.round(w.temp * 100) / 100),
+    ...rows.map((x) => {
+      const ts = new Date(x.ts); ts.setUTCMilliseconds(0);
+      return env.DB.prepare('INSERT OR IGNORE INTO readings (sensor_id, ts, temp) VALUES (?,?,?)')
+        .bind(STATION_SENSOR, ts.toISOString(), Math.round(x.temp * 100) / 100);
+    }),
   ]);
 }
 
@@ -608,7 +618,7 @@ async function routeApi(request, env, url, user) {
     const temps = fc?.hourly?.temperature_2m?.slice(0, 72) || [];
     if (station.error && !temps.length) throw new HttpError(502, station.error);
     return json({
-      station: station.error ? null : station,
+      station: station.error ? null : { ...station, history: undefined },
       station_error: station.error || null,
       token_expires: station.token_expires || null,
       min_next_72h: temps.length ? Math.min(...temps) : null,

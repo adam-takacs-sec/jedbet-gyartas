@@ -2,7 +2,7 @@
 """JEDBET Pi-ügynök.
 
 Két dolgot csinál, mást semmit:
-  1. 5 percenként leolvassa a DS18B20 szenzorokat, és felküldi a mérést a
+  1. Percenként (SAMPLE_SEC) leolvassa a DS18B20 szenzorokat, és felküldi a mérést a
      gyártási oldalnak. Ha nincs net, a mérés egy helyi SQLite-pufferben vár,
      és visszatöltődik, amint újra van kapcsolat.
   2. Pár másodpercenként megnézi, van-e nyomtatandó címke, és ha van,
@@ -22,6 +22,7 @@ Beállítás: /home/admin/jedbet-agent.env
   NIIMCTL=/home/admin/niimbot_b1.py   (opcionális)
   SHELLY_HEATER=192.168.1.201       (opcionális; üresen hagyva nincs fűtésvezérlés)
   SHELLY_FAN=192.168.1.202          (opcionális; üresen hagyva nincs ventilátorvezérlés)
+  SAMPLE_SEC=60                     (opcionális; mérési időköz másodpercben, a fűtésszabályozáshoz kell a sűrű mérés)
 """
 import base64
 import glob
@@ -41,12 +42,11 @@ from datetime import datetime, timezone
 HOME = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.environ.get("JEDBET_ENV", os.path.join(HOME, "jedbet-agent.env"))
 BUFFER_DB = os.path.join(HOME, "jedbet-buffer.sqlite")
-SAMPLE_SEC = 300
+SAMPLE_SEC = 60
 PRINT_POLL_SEC = 4
 PLUG_POLL_SEC = 10
 PLUG_SAFETY_SEC = 120   # ennyi idő után kapcsol le a dugalj, ha nem jön megújítás
 W1_GLOB = os.environ.get("JEDBET_W1_GLOB", "/sys/bus/w1/devices/28-*")
-SAMPLE_SEC = int(os.environ.get("JEDBET_SAMPLE_SEC", SAMPLE_SEC))
 
 
 def log(*a):
@@ -72,10 +72,12 @@ def load_env():
     cfg.setdefault("NIIMCTL", os.path.join(HOME, "niimbot_b1.py"))
     cfg.setdefault("SHELLY_HEATER", "192.168.1.201")
     cfg.setdefault("SHELLY_FAN", "192.168.1.202")
+    cfg.setdefault("SAMPLE_SEC", os.environ.get("JEDBET_SAMPLE_SEC", str(SAMPLE_SEC)))
     return cfg
 
 
 CFG = load_env()
+SAMPLE_SEC = max(15, int(CFG["SAMPLE_SEC"]))
 
 
 def request(method, path, payload=None, timeout=15):

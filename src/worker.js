@@ -1,6 +1,7 @@
 import { computeMaturity, hoursToTarget } from './maturity.js';
 import { TEMPLATES, PANEL_TEMPLATES, TZ, HttpError, bad, notFound, json, body, num, str, localDate, localDateTime } from './util.js';
 import { routeNap, HOURS_SQL } from './napi.js';
+import { BOX_DEFAULTS, cleanSettings, decide, PHASE_NAMES } from './box.js';
 
 // ---------------------------------------------------------------------------
 // Beállítások
@@ -492,8 +493,32 @@ async function routeApi(request, env, url, user) {
     if (!key) notFound();
     const b = await body(request);
     if (typeof b.on !== 'boolean') bad('Érvénytelen érték: on');
+    // Kézi kapcsolás: az automatika leáll, különben a következő körben felülírná.
+    if ((await getMeta(db, 'box_control'))?.run_id) await stopBox(db, user.email, false);
     await setMeta(db, `${key}_desired`, { on: b.on, at: new Date().toISOString(), by: user.email });
     return json(await plugsState(db));
+  }
+
+  // --- Kötődoboz automatika ---
+  if (p === '/api/box' && m === 'GET') return json(await boxState(db));
+  if (p === '/api/box/settings' && m === 'POST') {
+    const b = await body(request);
+    let s;
+    try { s = cleanSettings(b, await getMeta(db, 'box_settings') || BOX_DEFAULTS); } catch (e) { bad(e.message); }
+    await setMeta(db, 'box_settings', s);
+    return json(await boxState(db));
+  }
+  if (p === '/api/box/start' && m === 'POST') {
+    const b = await body(request);
+    const run = await db.prepare('SELECT id FROM curing_runs WHERE id = ? AND ended_at IS NULL')
+      .bind(num(b.run_id, 'kötés', { min: 1 })).first();
+    if (!run) bad('Nincs ilyen nyitott kötés');
+    await startBox(db, run.id, user.email);
+    return json(await boxState(db));
+  }
+  if (p === '/api/box/stop' && m === 'POST') {
+    await stopBox(db, user.email, true);
+    return json(await boxState(db));
   }
 
   // --- Szenzorok, érlelés ---
@@ -538,6 +563,7 @@ async function routeApi(request, env, url, user) {
       .bind(str(b.name, 'név', { required: true, max: 120 }), b.mix_id ? num(b.mix_id, 'mix_id', { min: 1 }) : null,
         JSON.stringify(ids), started.toISOString(), num(b.target_te_h, 'cél', { min: 1, max: 2000, def: 48 }),
         str(b.note, 'megjegyzés')).first();
+    if (b.auto === true) await startBox(db, row.id, user.email);
     return json({ run_id: row.id });
   }
   if ((r = p.match(/^\/api\/curing\/(\d+)$/)) && m === 'GET') {
@@ -550,6 +576,7 @@ async function routeApi(request, env, url, user) {
     if (b.end === true) {
       await db.prepare(`UPDATE curing_runs SET ended_at = ? WHERE id = ? AND ended_at IS NULL`)
         .bind(new Date().toISOString(), +r[1]).run();
+      if ((await getMeta(db, 'box_control'))?.run_id === +r[1]) await stopBox(db, user.email, true);
     }
     if (b.target_te_h !== undefined) {
       await db.prepare('UPDATE curing_runs SET target_te_h = ? WHERE id = ?')
@@ -791,6 +818,8 @@ async function routeDevice(request, env, url) {
   if ((p === '/device/plugs' || p === '/device/heater') && m === 'POST') {
     const b = await body(request);
     const reports = p === '/device/heater' ? { futo: b } : b;
+    // Ha egy kötés vezérli a dobozt, itt döntünk (10 mp-enként), és ez írja a kért állapotot.
+    try { await boxTick(db); } catch (e) { console.error('boxTick', e); }
     const out = {};
     for (const [id, key] of Object.entries(PLUGS)) {
       const x = reports[id];
@@ -852,4 +881,85 @@ async function plugsState(db) {
     out[id] = { desired: desired || { on: false }, actual };
   }
   return out;
+}
+
+
+// ---------------------------------------------------------------------------
+// Kötődoboz automatika (lásd src/box.js)
+// ---------------------------------------------------------------------------
+const READY_CHECK_MIN = 5;
+
+async function boxSettings(db) {
+  return { ...BOX_DEFAULTS, ...(await getMeta(db, 'box_settings') || {}) };
+}
+
+async function startBox(db, runId, by) {
+  await setMeta(db, 'box_control', { run_id: runId, at: new Date().toISOString(), by, cool_started_at: null });
+}
+
+async function stopBox(db, by, allOff) {
+  const ctl = await getMeta(db, 'box_control') || {};
+  await setMeta(db, 'box_control', { ...ctl, run_id: null, stopped_at: new Date().toISOString(), stopped_by: by });
+  if (allOff) {
+    const at = new Date().toISOString();
+    for (const key of Object.values(PLUGS)) await setMeta(db, `${key}_desired`, { on: false, at, by });
+  }
+}
+
+// A doboz levegő-szenzorai: a kötés levegő szerepű szenzorai, a kültéri állomás nélkül.
+// Ha a kötésben nincs ilyen, az összes aktív doboz-levegőszenzor.
+async function boxAirReadings(db, run) {
+  const { results: all } = await db.prepare(
+    `SELECT id, offset_c FROM sensors WHERE role = 'air' AND active = 1 AND id != ?`).bind(STATION_SENSOR).all();
+  const inRun = new Set(JSON.parse(run.sensor_ids));
+  let use = all.filter((x) => inRun.has(x.id));
+  if (!use.length) use = all;
+  const out = [];
+  for (const x of use) {
+    const r = await db.prepare('SELECT ts, temp FROM readings WHERE sensor_id = ? ORDER BY ts DESC LIMIT 1').bind(x.id).first();
+    if (r) out.push({ sensor_id: x.id, ts: r.ts, temp: r.temp + x.offset_c });
+  }
+  return out;
+}
+
+async function boxTick(db) {
+  const ctl = await getMeta(db, 'box_control');
+  if (!ctl?.run_id) return null;
+  const run = await db.prepare('SELECT * FROM curing_runs WHERE id = ?').bind(ctl.run_id).first();
+  if (!run || run.ended_at) { await stopBox(db, 'auto', true); return null; }
+  const s = await boxSettings(db);
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+
+  // A küszöb elérését ritkábban nézzük (a teljes idősort számolja).
+  if (!ctl.cool_started_at && (!ctl.ready_checked_at || now - Date.parse(ctl.ready_checked_at) > READY_CHECK_MIN * 60000)) {
+    const st = await runStatus(db, run, false);
+    ctl.ready_checked_at = nowIso;
+    ctl.progress = st.progress;
+    if (st.ready) ctl.cool_started_at = nowIso;
+  }
+
+  const air = await boxAirReadings(db, run);
+  const heaterDesired = await getMeta(db, 'heater_desired');
+  const fanDesired = await getMeta(db, 'fan_desired');
+  const d = decide({ s, startedAt: run.started_at, now, coolStartedAt: ctl.cool_started_at, air, heaterWasOn: !!heaterDesired?.on });
+
+  if (!!heaterDesired?.on !== d.heater) await setMeta(db, 'heater_desired', { on: d.heater, at: nowIso, by: 'auto' });
+  if (!!fanDesired?.on !== d.fan) await setMeta(db, 'fan_desired', { on: d.fan, at: nowIso, by: 'auto' });
+  ctl.last = { ...d, at: nowIso };
+  await setMeta(db, 'box_control', ctl);
+  return ctl;
+}
+
+async function boxState(db) {
+  const [ctl, settings] = await Promise.all([getMeta(db, 'box_control'), boxSettings(db)]);
+  let run = null;
+  if (ctl?.run_id) run = await db.prepare('SELECT id, name, started_at FROM curing_runs WHERE id = ?').bind(ctl.run_id).first();
+  return {
+    active: !!ctl?.run_id, run, settings, defaults: BOX_DEFAULTS,
+    cool_started_at: ctl?.cool_started_at || null, progress: ctl?.progress ?? null,
+    last: ctl?.run_id ? ctl.last || null : null,
+    phase_name: ctl?.run_id && ctl.last ? PHASE_NAMES[ctl.last.phase] : null,
+    stopped_at: ctl?.stopped_at || null, stopped_by: ctl?.stopped_by || null,
+  };
 }

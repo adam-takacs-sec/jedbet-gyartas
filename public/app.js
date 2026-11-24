@@ -214,15 +214,68 @@ async function loadPlugs() {
 $$('.plug-btn').forEach((btn) => btn.addEventListener('click', async () => {
   const id = btn.dataset.plug;
   const on = !state.plugs?.[id]?.desired?.on;
+  if (state.box?.active && !confirm('Az automatika vezérli a dobozt. Kézi kapcsolással leáll az automatika. Folytatod?')) return;
   btn.disabled = true;
   try {
     renderPlugs(await api(`/api/plugs/${id}`, { method: 'POST', body: { on } }));
     toast(`${PLUG_NAMES[id]} ${on ? 'bekapcsolva' : 'kikapcsolva'}, a Pi 10 mp-en belül átállítja`);
+    loadBox();
   } finally { btn.disabled = false; }
 }));
 
+// --- Kötődoboz automatika ---
+const BOX_FIELDS = ['delay_h', 'min_c', 'ramp_c_per_h', 'hold_c', 'max_air_c', 'hyst_c', 'cool_h'];
+function renderBox(b) {
+  state.box = b;
+  $('#box-stop').hidden = !b.active;
+  const f = $('#box-settings');
+  if (!f.contains(document.activeElement)) for (const k of BOX_FIELDS) f[k].value = b.settings[k];
+  let html;
+  if (!b.active) {
+    html = 'Ki van kapcsolva, a fűtést kézzel kapcsolod. Bekapcsolás: új kötésnél a jelölőnégyzettel, vagy egy nyitott kötésnél az „Automatika ezen a kötésen” gombbal.';
+    if (b.stopped_at) html += `<br>Utoljára leállítva: ${fmtTime(b.stopped_at)}${b.stopped_by && b.stopped_by !== 'auto' ? ` (${esc(b.stopped_by)})` : ''}.`;
+  } else {
+    const l = b.last;
+    const parts = [`Kötés: <b>${esc(b.run?.name || '#' + b.run?.id)}</b>`];
+    if (!l) parts.push('Várom a Pi első jelentését (10 mp-en belül)…');
+    else {
+      const old = Date.now() - Date.parse(l.at) > 60000;
+      parts.push(`Fázis: <b>${esc(b.phase_name)}</b>`);
+      if (l.target !== null) parts.push(`Cél: <b>${fmt(l.target, 1)} °C</b>`);
+      parts.push(`Levegő: <b>${l.air === null ? '–' : fmt(l.air, 1) + ' °C'}</b>`);
+      parts.push(`Fűtő: <b>${l.heater ? 'BE' : 'KI'}</b>, ventilátor: <b>${l.fan ? 'BE' : 'KI'}</b>`);
+      if (b.progress !== null) parts.push(`Kötés: <b>${Math.min(100, Math.round(b.progress * 100))}%</b>`);
+      const warn = /Nincs friss|Túlmeleg/.test(l.reason);
+      parts.push(`<span class="${warn ? 'neg' : ''}">${warn ? '⚠ ' : ''}${esc(l.reason)}</span>`);
+      if (old) parts.push(`<span class="neg">⚠ A Pi ${ago(l.at)} jelentett utoljára, az automatika addig nem lép</span>`);
+    }
+    html = parts.join(" · ");
+  }
+  $('#box-status').innerHTML = html;
+  $$('[data-box-start]').forEach((x) => (x.hidden = b.active && b.run?.id === +x.dataset.boxStart));
+}
+async function loadBox() {
+  try { renderBox(await api('/api/box', { quiet: true })); }
+  catch { $('#box-status').textContent = 'Az automatika állapota nem érhető el.'; }
+}
+$('#box-stop').addEventListener('click', async () => {
+  if (!confirm('Leállítod az automatikát? A fűtő és a ventilátor kikapcsol.')) return;
+  renderBox(await api('/api/box/stop', { method: 'POST', body: {} })); loadPlugs(); toast('Automatika leállítva');
+});
+$('#box-settings').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const body = Object.fromEntries(BOX_FIELDS.map((k) => [k, f[k].value]));
+  renderBox(await api('/api/box/settings', { method: 'POST', body })); toast('Beállítások mentve');
+});
+$('#box-defaults').addEventListener('click', () => {
+  const f = $('#box-settings');
+  for (const k of BOX_FIELDS) f[k].value = state.box?.defaults?.[k] ?? '';
+});
+
 async function loadCuring() {
   loadPlugs();
+  loadBox();
   await loadSensors();
   const [runs, pallets] = await Promise.all([api('/api/curing'), api('/api/pallets')]);
   state.pallets = pallets;
@@ -293,6 +346,7 @@ function runHtml(r) {
     </form>`}
     <div class="row-btns">
       ${r.ended_at ? '' : `<button class="btn primary sm" data-demold-open="${r.id}">Kiforgatás: új raklap</button>
+      <button class="btn sm" data-box-start="${r.id}" ${state.box?.active && state.box.run?.id === r.id ? 'hidden' : ''}>Automatika ezen a kötésen</button>
       <button class="btn sm" data-end="${r.id}">Kötés lezárása</button>
       <button class="btn sm" data-target="${r.id}" data-current="${r.target_te_h}">Küszöb módosítása</button>`}
     </div></div>`;
@@ -451,6 +505,16 @@ $('#runs').addEventListener('click', async (e) => {
     f.hidden = false; f.demolded_at.value = todayLocalInput(); f.panel_count.focus();
   }
   if (cancel) cancel.closest('form').hidden = true;
+  const boxStart = e.target.closest('[data-box-start]');
+  if (boxStart) {
+    const msg = state.box?.active
+      ? `Most a(z) „${state.box.run?.name}” kötés vezérli a dobozt. Átállítod erre?`
+      : 'Indítod az automatikus fűtést ezen a kötésen?';
+    if (confirm(msg)) {
+      renderBox(await api('/api/box/start', { method: 'POST', body: { run_id: +boxStart.dataset.boxStart } }));
+      toast('Automatika elindítva');
+    }
+  }
   if (serial) openPallet(serial.dataset.openSerial);
   if (end && confirm('Lezárod ezt a kötést? Utána nem számol tovább, és nem lehet hozzá raklapot rögzíteni.')) {
     await api(`/api/curing/${end.dataset.end}`, { method: 'PATCH', body: { end: true } }); loadCuring();
@@ -491,7 +555,7 @@ $('#run-form').addEventListener('submit', async (e) => {
   const f = e.target;
   const ids = $$('input[name="sensor_ids"]:checked', f).map((x) => x.value);
   await api('/api/curing', { method: 'POST', body: {
-    name: f.name.value, mix_id: f.mix_id.value || null, sensor_ids: ids, target_te_h: f.target_te_h.value,
+    name: f.name.value, mix_id: f.mix_id.value || null, sensor_ids: ids, target_te_h: f.target_te_h.value, auto: f.auto.checked,
     started_at: f.started_at.value ? new Date(f.started_at.value).toISOString() : null } });
   f.hidden = true; f.reset(); toast('Kötés elindítva'); loadCuring();
 });
@@ -758,5 +822,5 @@ async function loadWeather() {
   loadStatus(); loadWeather();
   setInterval(loadStatus, 30000);
   setInterval(() => { if (!$('#tab-erleles').hidden && !document.hidden) loadCuring(); }, 120000);
-  setInterval(() => { if (!$('#tab-erleles').hidden && !document.hidden) loadPlugs(); }, 10000);
+  setInterval(() => { if (!$('#tab-erleles').hidden && !document.hidden) { loadPlugs(); loadBox(); } }, 10000);
 })();

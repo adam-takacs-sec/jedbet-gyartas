@@ -175,6 +175,25 @@
     <!-- KÖTÉS -->
     <section id="tab-erleles" class="tab" hidden>
       <div class="card">
+        <div class="card-head"><h2>Automatikus vezérlés</h2><button class="btn sm" id="box-stop" type="button" hidden>Automatika leállítása</button></div>
+        <div id="box-status" class="muted small">Betöltés…</div>
+        <details class="sub">
+          <summary>Beállítások (felfűtés, tartás, biztonság)</summary>
+          <form id="box-settings" class="form2">
+            <label>Várakozás öntés után (óra)<input name="delay_h" type="number" step="any" min="0" max="24"></label>
+            <label>Fagyvédelem: legalább (°C)<input name="min_c" type="number" step="any" min="0" max="25"></label>
+            <label>Felfűtés (°C/óra)<input name="ramp_c_per_h" type="number" step="any" min="1" max="30"></label>
+            <label>Tartás (°C)<input name="hold_c" type="number" step="any" min="15" max="45"></label>
+            <label>Biztonsági maximum, levegő (°C)<input name="max_air_c" type="number" step="any" min="25" max="60"></label>
+            <label>Hiszterézis (°C)<input name="hyst_c" type="number" step="any" min="0.2" max="5"></label>
+            <label>Hűtés a küszöb után (óra)<input name="cool_h" type="number" step="any" min="0" max="6"></label>
+            <div class="row-btns"><button class="btn primary" type="submit">Mentés</button><button class="btn" type="button" id="box-defaults">Alapértékek</button></div>
+          </form>
+          <p class="muted small">A szabályozás a doboz <b>levegő</b> szerepű szenzorát figyeli (a kültéri Nubila-állomást nem). Ha 3 percig nincs friss mérése, vagy eléri a maximumot, a fűtő kikapcsol. Ha a Pi vagy a net kiesik, a Shelly 2 perc múlva magától lekapcsol.</p>
+        </details>
+      </div>
+
+      <div class="card">
         <div class="card-head"><h2>Fűtés</h2><button class="btn primary plug-btn" data-plug="futo" disabled>…</button></div>
         <p class="muted small plug-status" data-plug="futo">Betöltés…</p>
         <div class="card-head" style="margin-top:.8rem"><h2>Ventilátor</h2><button class="btn primary plug-btn" data-plug="venti" disabled>…</button></div>
@@ -199,6 +218,7 @@
           <label>Keverés (opcionális)<select name="mix_id" id="run-mix"><option value="">—</option></select></label>
           <fieldset><legend>Szenzorok</legend><div id="run-sensors" class="checks"></div></fieldset>
           <label>Kiforgatási küszöb (egyenértékű kor, óra 20 °C-on)<input name="target_te_h" type="number" value="48" min="1" step="any"></label>
+          <label class="check"><input type="checkbox" name="auto" checked> A doboz fűtését ez a kötés vezérli automatikusan</label>
           <label>Öntés vége (a kötés kezdete)<input name="started_at" type="datetime-local"></label>
           <div class="row-btns"><button class="btn primary" type="submit">Indítás</button><button class="btn" type="button" id="run-cancel">Mégse</button></div>
         </form>

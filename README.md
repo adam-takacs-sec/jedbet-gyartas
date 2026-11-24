@@ -17,7 +17,8 @@ Pi (jedbet_agent.py) ── HTTPS ───────┘  /device/readings, /d
 | `src/napi.js` | Napi lap: tervezett és plusz feladatok, öntés indítása/lezárása (→ kötés), napzárás, munkások, munkanapló, kifizetések |
 | `src/maturity.js` | Nurse–Saul (T₀ = −10 °C) és egyenértékű kor (Freiesleben Hansen, 20 °C) |
 | `public/` | A felület. A címkét a böngésző rajzolja (384×240, 1 bites PNG, QR-ral) |
-| `pi/jedbet_agent.py` | 5 percenként szenzorok → felhő (helyi pufferrel); nyomtatási sor → `niimctl.py` |
+| `src/box.js` | Kötődoboz automatika: fázisok és termosztát (tiszta függvények) |
+| `pi/jedbet_agent.py` | Percenként szenzorok → felhő (helyi pufferrel); nyomtatási sor → `niimctl.py`; dugaljak (Shelly) |
 | `pi/install.sh` | A Pi-n: telepíti az ügynököt, leállítja a régi szolgáltatásokat, tokent generál |
 
 ## Napi lap
@@ -37,6 +38,15 @@ Pi (jedbet_agent.py) ── HTTPS ───────┘  /device/readings, /d
 - 20 percnél hosszabb adatkiesést nem töltünk ki: ott az érettség nem nő (óvatos hiba), és a felület jelzi.
 - A küszöb alapból 48 óra egyenértékű kor; laboros kalibrációig becslés.
 - Szenzoronként kalibrációs eltolás állítható (jeges vizes próba).
+
+## Kötődoboz automatika
+
+- Egy kötés vezérelheti a dobozt (új kötésnél jelölőnégyzet, vagy a kötés „Automatika ezen a kötésen” gombja). Állapota a `meta` táblában: `box_control`, beállításai: `box_settings`.
+- Fázisok a kötés kezdetétől: **várakozás** (alapból 3 óra, csak fagyvédelem 10 °C-ig) → **felfűtés** (12 °C/óra) → **tartás** (32 °C), amíg a döntő próbatest el nem éri a küszöböt → **hűtés** (1 óra, ventilátor) → **kész**.
+- A döntés a Pi 10 mp-es dugalj-jelentésénél születik (`/device/plugs`), a doboz levegő-szenzora alapján (a Nubila-állomás nem számít). Bekapcsol ≤ cél − 1 °C-nál, kikapcsol ≥ cél + 0,5 °C-nál.
+- Biztonság: 3 percnél régebbi levegőmérésnél a fűtő KI; 40 °C felett fűtő KI, ventilátor BE; a Shelly a Pi kiesésekor 2 perc múlva magától lekapcsol.
+- Kézi kapcsolás vagy a kötés lezárása leállítja az automatikát.
+- Ehhez a Pi percenként mér (`SAMPLE_SEC=60`).
 
 ## Beállítás
 

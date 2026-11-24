@@ -955,7 +955,15 @@ async function boxTick(db) {
   const air = await boxAirReadings(db, run);
   const heaterDesired = await getMeta(db, 'heater_desired');
   const fanDesired = await getMeta(db, 'fan_desired');
-  const d = decide({ s, startedAt: run.started_at, now, coolStartedAt: ctl.cool_started_at, air, heaterWasOn: !!heaterDesired?.on });
+  // A felfűtés az első olyan körben indul, amikor a várakozás már letelt: ekkortól és a
+  // leghidegebb pont akkori hőmérsékletétől emelkedik a cél óránként ramp_c_per_h-val.
+  if (!ctl.ramp_started_at && !ctl.cool_started_at && (now - Date.parse(run.started_at)) / 3600000 >= s.delay_h) {
+    const fresh = air.filter((x) => now - Date.parse(x.ts) <= 3 * 60000);
+    ctl.ramp_started_at = nowIso;
+    ctl.ramp_base = fresh.length ? Math.round(Math.min(...fresh.map((x) => x.temp)) * 10) / 10 : null;
+  }
+  const d = decide({ s, startedAt: run.started_at, now, coolStartedAt: ctl.cool_started_at,
+    rampStartedAt: ctl.ramp_started_at || null, rampBase: ctl.ramp_base ?? null, air, heaterWasOn: !!heaterDesired?.on });
 
   if (!!heaterDesired?.on !== d.heater) await setMeta(db, 'heater_desired', { on: d.heater, at: nowIso, by: 'auto' });
   if (!!fanDesired?.on !== d.fan) await setMeta(db, 'fan_desired', { on: d.fan, at: nowIso, by: 'auto' });
@@ -971,6 +979,7 @@ async function boxState(db) {
   return {
     active: !!ctl?.run_id, run, settings, defaults: BOX_DEFAULTS,
     cool_started_at: ctl?.cool_started_at || null, progress: ctl?.progress ?? null,
+    ramp_started_at: ctl?.run_id ? ctl.ramp_started_at || null : null, ramp_base: ctl?.run_id ? ctl.ramp_base ?? null : null,
     last: ctl?.run_id ? ctl.last || null : null,
     phase_name: ctl?.run_id && ctl.last ? PHASE_NAMES[ctl.last.phase] : null,
     stopped_at: ctl?.stopped_at || null, stopped_by: ctl?.stopped_by || null,

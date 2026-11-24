@@ -1,6 +1,6 @@
 // JEDBET gyártási felület
 
-import { $, $$, esc, fmt, fmtTime, ago, api, toast, formData, ft } from './lib.js';
+import { $, $$, esc, fmt, fmtTime, ago, api, toast, formData, ft, hhmm } from './lib.js';
 import { initNap, loadNap, loadWorkers } from './nap.js';
 import { initJobs, loadJobs } from './munkak.js';
 
@@ -242,6 +242,7 @@ function renderBox(b) {
       const old = Date.now() - Date.parse(l.at) > 60000;
       parts.push(`Fázis: <b>${esc(b.phase_name)}</b>`);
       if (l.target !== null) parts.push(`Cél: <b>${fmt(l.target, 1)} °C</b>`);
+      if (b.ramp_started_at && l.phase === 'felfutes') parts.push(`Felfűtés indult: ${hhmm(b.ramp_started_at)}${b.ramp_base !== null ? ` (${fmt(b.ramp_base, 1)} °C-ról)` : ''}`);
       parts.push(l.air_max === undefined || l.air_max === null || l.air_max === l.air
         ? `Levegő: <b>${l.air === null ? '–' : fmt(l.air, 1) + ' °C'}</b>`
         : `Levegő: <b>${fmt(l.air_min, 1)} – ${fmt(l.air_max, 1)} °C</b> (leghidegebb – legmelegebb)`);

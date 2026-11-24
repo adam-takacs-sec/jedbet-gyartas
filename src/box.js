@@ -4,7 +4,10 @@
 // A fázisok az öntés végétől (a kötés kezdetétől) eltelt időből adódnak:
 //
 //   várakozás  0 … delay_h           cél: min_c (csak fagyvédelem, nem fűtjük a friss betont)
-//   felfűtés   delay_h …             cél: min_c + ramp_c_per_h · (t − delay_h), legfeljebb hold_c
+//   felfűtés   delay_h …             cél: a felfűtés indulásakor mért leghidegebb pont
+//                                    + ramp_c_per_h · (a felfűtés indulása óta eltelt idő),
+//                                    legalább min_c, legfeljebb hold_c. A felfűtés akkor indul,
+//                                    amikor a várakozás letelt ÉS az automatika már fut.
 //   tartás     amíg a döntő próbatest el nem éri a küszöböt   cél: hold_c
 //   hűtés      cool_h ideig          fűtő ki, ventilátor be
 //   kész       minden ki, lehet kiforgatni
@@ -47,14 +50,15 @@ export function cleanSettings(b = {}, cur = BOX_DEFAULTS) {
 }
 
 /** A fázis és a célhőmérséklet adott időpontban. */
-export function phaseAt({ s, startedAt, now, coolStartedAt }) {
+export function phaseAt({ s, startedAt, now, coolStartedAt, rampStartedAt = null, rampBase = null }) {
   if (coolStartedAt) {
     const coolH = (now - Date.parse(coolStartedAt)) / 3600000;
     return coolH < s.cool_h ? { phase: 'hutes', target: null } : { phase: 'kesz', target: null };
   }
   const h = (now - Date.parse(startedAt)) / 3600000;
   if (h < s.delay_h) return { phase: 'varakozas', target: s.min_c };
-  const ramp = s.min_c + s.ramp_c_per_h * (h - s.delay_h);
+  const rh = rampStartedAt ? Math.max(0, (now - Date.parse(rampStartedAt)) / 3600000) : 0;
+  const ramp = Math.max(s.min_c, (rampBase ?? s.min_c) + s.ramp_c_per_h * rh);
   if (ramp < s.hold_c) return { phase: 'felfutes', target: Math.round(ramp * 10) / 10 };
   return { phase: 'tartas', target: s.hold_c };
 }
@@ -70,8 +74,8 @@ export function phaseAt({ s, startedAt, now, coolStartedAt }) {
  * @param {boolean} a.heaterWasOn
  * @returns {{phase, target, air, air_min, air_max, heater:boolean, fan:boolean, reason:string}}
  */
-export function decide({ s, startedAt, now, coolStartedAt, air, heaterWasOn }) {
-  const { phase, target } = phaseAt({ s, startedAt, now, coolStartedAt });
+export function decide({ s, startedAt, now, coolStartedAt, rampStartedAt = null, rampBase = null, air, heaterWasOn }) {
+  const { phase, target } = phaseAt({ s, startedAt, now, coolStartedAt, rampStartedAt, rampBase });
   const fresh = air.filter((x) => Number.isFinite(x.temp) && now - Date.parse(x.ts) <= STALE_MIN * 60000);
   const r1 = (x) => Math.round(x * 10) / 10;
   const coldest = fresh.length ? r1(Math.min(...fresh.map((x) => x.temp))) : null;

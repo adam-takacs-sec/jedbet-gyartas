@@ -565,6 +565,13 @@ async function routeApi(request, env, url, user) {
     await startBox(db, run.id, user.email);
     return json(await boxState(db));
   }
+  if (p === '/api/box/cool' && m === 'POST') {
+    const ctl = await getMeta(db, 'box_control');
+    if (!ctl?.run_id) bad('Nincs automatikus vezérlés');
+    if (ctl.cool_started_at) bad('A hűtés már elindult');
+    await setMeta(db, 'box_control', { ...ctl, cool_started_at: new Date().toISOString(), cool_base: null, cool_by: user.email });
+    return json(await boxState(db));
+  }
   if (p === '/api/box/stop' && m === 'POST') {
     await stopBox(db, user.email, true);
     return json(await boxState(db));
@@ -583,7 +590,7 @@ async function routeApi(request, env, url, user) {
   if ((r = p.match(/^\/api\/sensors\/([\w-]+)$/)) && m === 'PATCH') {
     const b = await body(request);
     const role = str(b.role, 'szerep', { required: true });
-    if (!['specimen', 'air'].includes(role)) bad('Ismeretlen szerep');
+    if (!['specimen', 'air', 'floor'].includes(role)) bad('Ismeretlen szerep');
     await db.prepare('UPDATE sensors SET label = ?, role = ?, offset_c = ?, active = ? WHERE id = ?')
       .bind(str(b.label, 'név', { required: true, max: 60 }), role,
         num(b.offset_c, 'eltolás', { min: -5, max: 5, def: 0 }), b.active === false ? 0 : 1, r[1]).run();
@@ -992,6 +999,11 @@ async function boxTick(db) {
   }
 
   const air = await boxAirReadings(db, run);
+  // A hűtés kezdő értéke: az indulás pillanatában mért levegő-átlag.
+  if (ctl.cool_started_at && (ctl.cool_base === undefined || ctl.cool_base === null)) {
+    const fr = air.filter((x) => now - Date.parse(x.ts) <= 3 * 60000);
+    ctl.cool_base = fr.length ? Math.round((fr.reduce((a, x) => a + x.temp, 0) / fr.length) * 10) / 10 : null;
+  }
   const heaterDesired = await getMeta(db, 'heater_desired');
   const fanDesired = await getMeta(db, 'fan_desired');
   // A felfűtés az első olyan körben indul, amikor a várakozás már letelt: ekkortól és a
@@ -1002,7 +1014,8 @@ async function boxTick(db) {
     ctl.ramp_base = fresh.length ? Math.round(Math.min(...fresh.map((x) => x.temp)) * 10) / 10 : null;
   }
   const d = decide({ s, startedAt: run.started_at, now, coolStartedAt: ctl.cool_started_at,
-    rampStartedAt: ctl.ramp_started_at || null, rampBase: ctl.ramp_base ?? null, air, heaterWasOn: !!heaterDesired?.on });
+    rampStartedAt: ctl.ramp_started_at || null, rampBase: ctl.ramp_base ?? null, coolBase: ctl.cool_base ?? null,
+    air, heaterWasOn: !!heaterDesired?.on, fanWasOn: !!fanDesired?.on });
 
   if (!!heaterDesired?.on !== d.heater) await setMeta(db, 'heater_desired', { on: d.heater, at: nowIso, by: 'auto' });
   if (!!fanDesired?.on !== d.fan) await setMeta(db, 'fan_desired', { on: d.fan, at: nowIso, by: 'auto' });
@@ -1077,7 +1090,8 @@ async function liveData(db) {
     const cool = ctl.cool_started_at && t >= Date.parse(ctl.cool_started_at) ? ctl.cool_started_at : null;
     const rampOn = ctl.ramp_started_at && t >= Date.parse(ctl.ramp_started_at);
     const g = phaseAt({ s, startedAt: run.started_at, now: t, coolStartedAt: cool,
-      rampStartedAt: rampOn ? ctl.ramp_started_at : null, rampBase: rampOn ? ctl.ramp_base ?? null : null }).target;
+      rampStartedAt: rampOn ? ctl.ramp_started_at : null, rampBase: rampOn ? ctl.ramp_base ?? null : null,
+      coolBase: ctl.cool_base ?? null }).target;
     return g === null ? null : r1(g);
   };
   let series = mins.map((a) => ({ ts: a.ts, t: r1(a.sum / a.n), g: goalAt(a.ts) }));

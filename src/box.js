@@ -9,7 +9,11 @@
 //                                    legalább min_c, legfeljebb hold_c. A felfűtés akkor indul,
 //                                    amikor a várakozás letelt ÉS az automatika már fut.
 //   tartás     amíg a döntő próbatest el nem éri a küszöböt   cél: hold_c
-//   hűtés      cool_h ideig          fűtő ki, ventilátor be
+//   hűtés      cool_h ideig          szabályozott hűtés: a cél a hűtés indulásakor mért
+//                                    levegő-átlagról egyenletesen csökken cool_end_c-ig;
+//                                    a ventilátor hűt, ha az átlag a cél fölött van, és a
+//                                    fűtő visszafog, ha az átlag 1,5 °C-kal a cél alá esne
+//                                    (így a beton nem hűl túl gyorsan).
 //   kész       minden ki, lehet kiforgatni
 //
 // Termosztát a doboz levegő-szenzoraira (a kültéri Nubila-állomás nem számít), a LEGHIDEGEBB
@@ -27,13 +31,14 @@ export const BOX_DEFAULTS = {
   max_air_c: 40,       // ha a legmelegebb pont eléri, a fűtő szünetel
   hyst_c: 1,           // bekapcsolási hiszterézis
   cool_h: 1,           // hűtés hossza a küszöb elérése után
+  cool_end_c: 12,      // a hűtés végén ennyi legyen a doboz levegője
 };
 export const STALE_MIN = 3;
 export const EMERGENCY_C = 5;  // max_air_c fölött ennyivel: ventilátor BE // ennél régebbi levegőmérés = nincs adat → fűtő KI
 
 const LIMITS = {
   delay_h: [0, 24], min_c: [0, 25], ramp_c_per_h: [1, 30], hold_c: [15, 45],
-  max_air_c: [25, 60], hyst_c: [0.2, 5], cool_h: [0, 6],
+  max_air_c: [25, 60], hyst_c: [0.2, 5], cool_h: [0, 6], cool_end_c: [0, 30],
 };
 
 export function cleanSettings(b = {}, cur = BOX_DEFAULTS) {
@@ -50,10 +55,14 @@ export function cleanSettings(b = {}, cur = BOX_DEFAULTS) {
 }
 
 /** A fázis és a célhőmérséklet adott időpontban. */
-export function phaseAt({ s, startedAt, now, coolStartedAt, rampStartedAt = null, rampBase = null }) {
+export function phaseAt({ s, startedAt, now, coolStartedAt, rampStartedAt = null, rampBase = null, coolBase = null }) {
   if (coolStartedAt) {
     const coolH = (now - Date.parse(coolStartedAt)) / 3600000;
-    return coolH < s.cool_h ? { phase: 'hutes', target: null } : { phase: 'kesz', target: null };
+    if (coolH >= s.cool_h) return { phase: 'kesz', target: null };
+    const end = s.cool_end_c ?? BOX_DEFAULTS.cool_end_c;
+    if (coolBase === null || coolBase === undefined || coolBase <= end || s.cool_h <= 0) return { phase: 'hutes', target: end };
+    const t = coolBase - (coolBase - end) * Math.max(0, coolH) / s.cool_h;
+    return { phase: 'hutes', target: Math.round(t * 10) / 10 };
   }
   const h = (now - Date.parse(startedAt)) / 3600000;
   if (h < s.delay_h) return { phase: 'varakozas', target: s.min_c };
@@ -74,15 +83,26 @@ export function phaseAt({ s, startedAt, now, coolStartedAt, rampStartedAt = null
  * @param {boolean} a.heaterWasOn
  * @returns {{phase, target, air, air_min, air_max, heater:boolean, fan:boolean, reason:string}}
  */
-export function decide({ s, startedAt, now, coolStartedAt, rampStartedAt = null, rampBase = null, air, heaterWasOn }) {
-  const { phase, target } = phaseAt({ s, startedAt, now, coolStartedAt, rampStartedAt, rampBase });
+export function decide({ s, startedAt, now, coolStartedAt, rampStartedAt = null, rampBase = null, coolBase = null,
+  air, heaterWasOn, fanWasOn = false }) {
+  const { phase, target } = phaseAt({ s, startedAt, now, coolStartedAt, rampStartedAt, rampBase, coolBase });
   const fresh = air.filter((x) => Number.isFinite(x.temp) && now - Date.parse(x.ts) <= STALE_MIN * 60000);
   const r1 = (x) => Math.round(x * 10) / 10;
   const coldest = fresh.length ? r1(Math.min(...fresh.map((x) => x.temp))) : null;
   const hottest = fresh.length ? r1(Math.max(...fresh.map((x) => x.temp))) : null;
+  const avg = fresh.length ? r1(fresh.reduce((a, x) => a + x.temp, 0) / fresh.length) : null;
   const base = { phase, target, air: coldest, air_min: coldest, air_max: hottest };
 
-  if (phase === 'hutes') return { ...base, heater: false, fan: true, reason: 'Hűtés a kiforgatás előtt' };
+  if (phase === 'hutes') {
+    if (avg === null) return { ...base, heater: false, fan: true, reason: 'Hűtés (nincs friss mérés, ventilátor be)' };
+    if (avg <= target - 1.5) {
+      return { ...base, heater: true, fan: false, reason: `Túl gyorsan hűl (átlag ${avg} °C, cél ${target} °C), fűtő visszafog` };
+    }
+    let fan = fanWasOn;
+    if (avg >= target + 0.5) fan = true;
+    else if (avg <= target - 0.5) fan = false;
+    return { ...base, heater: false, fan, reason: fan ? `Hűt: átlag ${avg} °C, cél ${target} °C` : `Hűtés a cél szerint halad (átlag ${avg} °C)` };
+  }
   if (phase === 'kesz') return { ...base, heater: false, fan: false, reason: 'Kész, kiforgatható' };
   if (coldest === null) {
     return { ...base, heater: false, fan: false, reason: `Nincs friss levegőmérés (${STALE_MIN} percen belül), a fűtő biztonságból KI` };

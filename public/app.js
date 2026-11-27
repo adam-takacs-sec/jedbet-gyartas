@@ -165,7 +165,7 @@ async function loadSensors() {
     <form class="sensor-row" data-id="${esc(s.id)}">
       <span class="id">${esc(s.id)}</span>
       <label>Név<input name="label" value="${esc(s.label)}" maxlength="60" required></label>
-      <label>Szerep<select name="role"><option value="specimen" ${s.role === 'specimen' ? 'selected' : ''}>próbatest</option><option value="air" ${s.role === 'air' ? 'selected' : ''}>levegő</option></select></label>
+      <label>Szerep<select name="role"><option value="specimen" ${s.role === 'specimen' ? 'selected' : ''}>próbatest</option><option value="air" ${s.role === 'air' ? 'selected' : ''}>levegő</option><option value="floor" ${s.role === 'floor' ? 'selected' : ''}>padló (csak mérés)</option></select></label>
       <label>Eltolás (°C)<input name="offset_c" type="number" step="0.05" min="-5" max="5" value="${s.offset_c}"></label>
       <label class="check"><input type="checkbox" name="active" ${s.active ? 'checked' : ''}> aktív</label>
       <button class="btn sm" type="submit">Mentés</button>
@@ -224,10 +224,11 @@ $$('.plug-btn').forEach((btn) => btn.addEventListener('click', async () => {
 }));
 
 // --- Kötődoboz automatika ---
-const BOX_FIELDS = ['delay_h', 'min_c', 'ramp_c_per_h', 'hold_c', 'max_air_c', 'hyst_c', 'cool_h'];
+const BOX_FIELDS = ['delay_h', 'min_c', 'ramp_c_per_h', 'hold_c', 'max_air_c', 'hyst_c', 'cool_h', 'cool_end_c'];
 function renderBox(b) {
   state.box = b;
   $('#box-stop').hidden = !b.active;
+  $('#box-cool').hidden = !b.active || !!b.cool_started_at;
   const f = $('#box-settings');
   if (!f.contains(document.activeElement)) for (const k of BOX_FIELDS) f[k].value = b.settings[k];
   let html;
@@ -261,6 +262,10 @@ async function loadBox() {
   try { renderBox(await api('/api/box', { quiet: true })); }
   catch { $('#box-status').textContent = 'Az automatika állapota nem érhető el.'; }
 }
+$('#box-cool').addEventListener('click', async () => {
+  if (!confirm('Most indítod a szabályozott hűtést? A beállított idő alatt hűti le a dobozt, utána kész.')) return;
+  renderBox(await api('/api/box/cool', { method: 'POST', body: {} })); toast('Hűtés elindítva');
+});
 $('#box-stop').addEventListener('click', async () => {
   if (!confirm('Leállítod az automatikát? A fűtő és a ventilátor kikapcsol.')) return;
   renderBox(await api('/api/box/stop', { method: 'POST', body: {} })); loadPlugs(); toast('Automatika leállítva');

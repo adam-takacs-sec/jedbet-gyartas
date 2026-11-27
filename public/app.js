@@ -167,6 +167,7 @@ async function loadSensors() {
       <label>Név<input name="label" value="${esc(s.label)}" maxlength="60" required></label>
       <label>Szerep<select name="role"><option value="specimen" ${s.role === 'specimen' ? 'selected' : ''}>próbatest</option><option value="air" ${s.role === 'air' ? 'selected' : ''}>levegő</option><option value="floor" ${s.role === 'floor' ? 'selected' : ''}>padló (csak mérés)</option></select></label>
       <label>Eltolás (°C)<input name="offset_c" type="number" step="0.05" min="-5" max="5" value="${s.offset_c}"></label>
+      <label>Szín<input name="color" type="color" value="${esc(s.color || '#8f9296')}"></label>
       <label class="check"><input type="checkbox" name="active" ${s.active ? 'checked' : ''}> aktív</label>
       <button class="btn sm" type="submit">Mentés</button>
     </form>`).join('');
@@ -179,7 +180,7 @@ $('#sensor-settings').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
   await api(`/api/sensors/${encodeURIComponent(f.dataset.id)}`, { method: 'PATCH',
-    body: { label: f.label.value, role: f.role.value, offset_c: f.offset_c.value, active: f.active.checked } });
+    body: { label: f.label.value, role: f.role.value, offset_c: f.offset_c.value, active: f.active.checked, color: f.color.value } });
   toast('Szenzor mentve'); loadCuring();
 });
 
@@ -468,7 +469,7 @@ function curingChartDetail(canvas, r) {
   const hx = (ts) => (Date.parse(ts) - start) / 3600000;
   const tempDs = [], teDs = [];
   r.sensors.forEach((s, i) => {
-    const col = SENSOR_COLORS[i % SENSOR_COLORS.length];
+    const col = s.color || SENSOR_COLORS[i % SENSOR_COLORS.length];
     const pts = (s.series || []).map((p) => ({ x: hx(p.ts), y: p.temp }));
     tempDs.push({ label: s.role === 'air' ? `${s.label} (levegő)` : s.label, data: smooth(pts), borderColor: col, backgroundColor: col,
       borderWidth: 2, pointRadius: 0, cubicInterpolationMode: 'monotone', borderDash: s.role === 'air' ? [6, 4] : [] });

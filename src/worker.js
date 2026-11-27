@@ -591,9 +591,11 @@ async function routeApi(request, env, url, user) {
     const b = await body(request);
     const role = str(b.role, 'szerep', { required: true });
     if (!['specimen', 'air', 'floor'].includes(role)) bad('Ismeretlen szerep');
-    await db.prepare('UPDATE sensors SET label = ?, role = ?, offset_c = ?, active = ? WHERE id = ?')
+    const color = b.color === undefined || b.color === null || b.color === '' ? null : String(b.color);
+    if (color !== null && !/^#[0-9a-fA-F]{6}$/.test(color)) bad('Érvénytelen szín');
+    await db.prepare('UPDATE sensors SET label = ?, role = ?, offset_c = ?, active = ?, color = ? WHERE id = ?')
       .bind(str(b.label, 'név', { required: true, max: 60 }), role,
-        num(b.offset_c, 'eltolás', { min: -5, max: 5, def: 0 }), b.active === false ? 0 : 1, r[1]).run();
+        num(b.offset_c, 'eltolás', { min: -5, max: 5, def: 0 }), b.active === false ? 0 : 1, color, r[1]).run();
     return json({ ok: true });
   }
   if (p === '/api/curing' && m === 'GET') {
@@ -805,7 +807,7 @@ async function runStatus(db, run, withSeries) {
     const rd = results.map((x) => ({ ts: x.ts, temp: x.temp + s.offset_c }));
     const mt = computeMaturity(rd, { startTs: run.started_at, endTs: end });
     const item = {
-      sensor_id: s.id, label: s.label, role: s.role,
+      sensor_id: s.id, label: s.label, role: s.role, color: s.color || null,
       nurse_saul: mt.nurseSaul, eq_age_h: mt.eqAgeH, elapsed_h: mt.elapsedH,
       covered_h: mt.coveredH, gaps: mt.gaps, min_temp: mt.minTemp,
       last_temp: mt.lastTemp, last_ts: mt.lastTs,
